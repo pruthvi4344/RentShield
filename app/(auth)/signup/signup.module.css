@@ -1,0 +1,90 @@
+.signupPage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 90px;
+}
+
+.signupHeading {
+  font-size: 36px;
+  font-weight: 600;
+}
+
+.signupSubheading {
+  margin-top: 10px;
+  color: gray;
+}
+
+.signupCards {
+  display: flex;
+  gap: 30px;
+  margin-top: 50px;
+}
+
+.signupCard {
+  width: 280px;
+  padding: 25px;
+  border-radius: 12px;
+  border: 1px solid #ddd;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.signupCard:hover {
+  border-color: #14a800;
+}
+
+.activeCard {
+  border: 2px solid #14a800;
+  background: #f7fff7;
+}
+
+.signupCard h3 {
+  margin-top: 10px;
+}
+
+.signupCard p {
+  color: gray;
+  margin-top: 6px;
+}
+
+.cardRadio {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid #aaa;
+  position: absolute;
+  top: 18px;
+  right: 18px;
+}
+
+.activeCard .cardRadio {
+  border-color: #14a800;
+  background: #14a800;
+}
+
+.continueButton {
+  margin-top: 40px;
+  padding: 12px 35px;
+  border-radius: 25px;
+  border: none;
+  background: #14a800;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.continueButton:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.loginText {
+  margin-top: 20px;
+}
+
+.loginText span {
+  color: #14a800;
+  cursor: pointer;
+}
