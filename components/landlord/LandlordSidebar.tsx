@@ -20,6 +20,8 @@ interface Props {
   pendingRequests?: number;
   userName?: string;
   userEmail?: string;
+  verificationLocked?: boolean;
+  onLockedNavigation?: () => void;
 }
 
 const navItems: {
@@ -92,10 +94,13 @@ export default function LandlordSidebar({
   pendingRequests = 2,
   userName,
   userEmail,
+  verificationLocked = false,
+  onLockedNavigation,
 }: Props) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const displayName = userName || "Landlord User";
   const initials = initialsFromName(displayName);
+  const allowedWhenUnverified: LandlordTab[] = ["profile", "settings", "verification"];
 
   const sidebarContent = (
     <div className="flex flex-col h-full">
@@ -147,7 +152,14 @@ export default function LandlordSidebar({
           return (
             <button
               key={item.id}
-              onClick={() => { onTabChange(item.id); setMobileOpen(false); }}
+              onClick={() => {
+                if (verificationLocked && !allowedWhenUnverified.includes(item.id)) {
+                  onLockedNavigation?.();
+                  return;
+                }
+                onTabChange(item.id);
+                setMobileOpen(false);
+              }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 group ${
                 isActive ? "bg-teal-50 text-teal-700" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
               }`}
@@ -161,6 +173,7 @@ export default function LandlordSidebar({
                   {badge}
                 </span>
               )}
+              {verificationLocked && !allowedWhenUnverified.includes(item.id) && <span className="text-xs text-slate-400">🔒</span>}
               {isActive && <div className="w-1.5 h-1.5 rounded-full bg-teal-500 flex-shrink-0" />}
             </button>
           );

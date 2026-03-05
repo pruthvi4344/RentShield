@@ -13,6 +13,7 @@ import LandlordProfile from "@/components/landlord/LandlordProfile";
 import LandlordSettings from "@/components/landlord/Settings";
 import { useRouter } from "next/navigation";
 import { getAuthIdentity, getOrCreateLandlordProfile, saveLandlordProfile } from "@/lib/profileService";
+import { supabase } from "@/lib/supabaseClient";
 import type { LandlordProfileRecord } from "@/types/profiles";
 
 const tabTitles: Record<LandlordTab, string> = {
@@ -27,12 +28,15 @@ const tabTitles: Record<LandlordTab, string> = {
   settings: "Settings",
 };
 
+const allowedWhenUnverified: LandlordTab[] = ["profile", "settings", "verification"];
+
 export default function LandlordDashboardPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<LandlordTab>("dashboard");
   const [profile, setProfile] = useState<LandlordProfileRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [accessMessage, setAccessMessage] = useState("");
 
   useEffect(() => {
     async function load() {
@@ -72,6 +76,24 @@ export default function LandlordDashboardPage() {
     }
   }
 
+  const verificationLocked = Boolean(profile && !profile.is_verified);
+
+  useEffect(() => {
+    if (verificationLocked && !allowedWhenUnverified.includes(activeTab)) {
+      setActiveTab("verification");
+      setAccessMessage("Please complete verification first to use RentShield services.");
+    }
+  }, [verificationLocked, activeTab]);
+
+  function handleTabChange(tab: LandlordTab) {
+    if (verificationLocked && !allowedWhenUnverified.includes(tab)) {
+      setAccessMessage("Please complete verification first to use RentShield services.");
+      return;
+    }
+    setAccessMessage("");
+    setActiveTab(tab);
+  }
+
   const landlordInitials = (profile?.username ?? "RS")
     .split(" ")
     .filter(Boolean)
@@ -79,10 +101,15 @@ export default function LandlordDashboardPage() {
     .map((part) => part[0]?.toUpperCase())
     .join("") || "RS";
 
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    router.replace("/");
+  }
+
   function renderContent() {
     switch (activeTab) {
-      case "dashboard":    return <LandlordDashboard onNavigate={setActiveTab} userName={profile?.username ?? "Landlord"} />;
-      case "verification": return <VerificationCenter />;
+      case "dashboard":    return <LandlordDashboard onNavigate={handleTabChange} userName={profile?.username ?? "Landlord"} />;
+      case "verification": return <VerificationCenter profile={profile} onSave={handleSave} saving={saving} />;
       case "add-property": return <AddProperty />;
       case "listings":     return <MyListings />;
       case "requests":     return <TenantRequests />;
@@ -102,11 +129,13 @@ export default function LandlordDashboardPage() {
     <div className="flex min-h-screen bg-slate-50">
       <LandlordSidebar
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={handleTabChange}
         unreadMessages={5}
         pendingRequests={2}
         userName={profile?.username}
         userEmail={profile?.email}
+        verificationLocked={verificationLocked}
+        onLockedNavigation={() => setAccessMessage("Please complete verification first to use RentShield services.")}
       />
 
       <div className="flex-1 min-w-0 flex flex-col">
@@ -121,6 +150,12 @@ export default function LandlordDashboardPage() {
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
               <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-teal-500 border border-white" />
             </button>
+            <button
+              onClick={() => void handleLogout()}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700"
+            >
+              Logout
+            </button>
             <div className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white text-sm font-bold shadow-sm cursor-pointer hover:ring-2 hover:ring-amber-400 hover:ring-offset-1 transition-all">
               {landlordInitials}
             </div>
@@ -128,6 +163,11 @@ export default function LandlordDashboardPage() {
         </header>
 
         <main className="flex-1 p-4 sm:p-6 overflow-auto">
+          {accessMessage && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700">
+              {accessMessage}
+            </div>
+          )}
           {renderContent()}
         </main>
       </div>

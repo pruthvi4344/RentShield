@@ -93,7 +93,13 @@ const completedCount = verificationItems.filter((i) => i.status === "verified").
 const totalCount = verificationItems.length;
 const pct = Math.round((completedCount / totalCount) * 100);
 
-export default function VerificationStatus() {
+type Props = {
+  isVerified: boolean;
+  onVerify: () => Promise<void>;
+  verifying?: boolean;
+};
+
+export default function VerificationStatus({ isVerified, onVerify, verifying = false }: Props) {
   const [uploading, setUploading] = useState<string | null>(null);
 
   function simulateUpload(id: string) {
@@ -233,6 +239,25 @@ export default function VerificationStatus() {
             </p>
           </div>
         </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm">
+        <p className="text-sm font-semibold text-slate-900 mb-2">Account Access</p>
+        <p className="text-xs text-slate-600 mb-4">
+          {isVerified
+            ? "Your account is verified. All RentShield features are unlocked."
+            : "Your account is not verified. Verify now to unlock listings, roommate finder, messages, and other services."}
+        </p>
+        <button
+          type="button"
+          disabled={isVerified || verifying}
+          onClick={() => {
+            void onVerify();
+          }}
+          className="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-teal-500 hover:bg-teal-600 disabled:opacity-60"
+        >
+          {isVerified ? "Verified" : verifying ? "Verifying..." : "Complete Verification"}
+        </button>
       </div>
     </div>
   );

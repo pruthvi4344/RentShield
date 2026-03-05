@@ -18,6 +18,8 @@ interface Props {
   unreadMessages?: number;
   userName?: string;
   userEmail?: string;
+  verificationLocked?: boolean;
+  onLockedNavigation?: () => void;
 }
 
 const navItems: {
@@ -112,10 +114,19 @@ function initialsFromName(name: string): string {
   return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
 }
 
-export default function RenterSidebar({ activeTab, onTabChange, unreadMessages = 2, userName, userEmail }: Props) {
+export default function RenterSidebar({
+  activeTab,
+  onTabChange,
+  unreadMessages = 2,
+  userName,
+  userEmail,
+  verificationLocked = false,
+  onLockedNavigation,
+}: Props) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const displayName = userName || "Renter User";
   const initials = initialsFromName(displayName);
+  const allowedWhenUnverified: Tab[] = ["profile", "settings", "verification"];
 
   const sidebarContent = (
     <div className="flex flex-col h-full">
@@ -158,7 +169,14 @@ export default function RenterSidebar({ activeTab, onTabChange, unreadMessages =
           return (
             <button
               key={item.id}
-              onClick={() => { onTabChange(item.id); setMobileOpen(false); }}
+              onClick={() => {
+                if (verificationLocked && !allowedWhenUnverified.includes(item.id)) {
+                  onLockedNavigation?.();
+                  return;
+                }
+                onTabChange(item.id);
+                setMobileOpen(false);
+              }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 group ${
                 isActive
                   ? "bg-teal-50 text-teal-700"
@@ -177,6 +195,7 @@ export default function RenterSidebar({ activeTab, onTabChange, unreadMessages =
               {isActive && (
                 <div className="w-1.5 h-1.5 rounded-full bg-teal-500 flex-shrink-0" />
               )}
+              {verificationLocked && !allowedWhenUnverified.includes(item.id) && <span className="text-xs text-slate-400">🔒</span>}
             </button>
           );
         })}

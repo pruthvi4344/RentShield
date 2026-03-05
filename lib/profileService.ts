@@ -10,6 +10,14 @@ function usernameFromEmail(email: string): string {
   return email.split("@")[0] || "User";
 }
 
+function landlordShouldBeVerified(profile: Pick<LandlordProfileRecord, "identity_verification_status" | "property_ownership_status" | "phone_verification_status">): boolean {
+  return (
+    profile.identity_verification_status === "verified" &&
+    profile.property_ownership_status === "verified" &&
+    profile.phone_verification_status === "verified"
+  );
+}
+
 export async function getAuthIdentity(): Promise<AuthIdentity | null> {
   const {
     data: { user },
@@ -71,7 +79,23 @@ export async function getOrCreateLandlordProfile(auth: AuthIdentity): Promise<La
     .maybeSingle();
 
   if (data) {
-    return data as LandlordProfileRecord;
+    const profile = data as LandlordProfileRecord;
+    const computedVerified = landlordShouldBeVerified(profile);
+
+    if (profile.is_verified !== computedVerified) {
+      const { data: synced, error: syncError } = await supabase
+        .from("landlord_profiles")
+        .update({ is_verified: computedVerified })
+        .eq("id", auth.id)
+        .select("*")
+        .single();
+
+      if (!syncError && synced) {
+        return synced as LandlordProfileRecord;
+      }
+    }
+
+    return profile;
   }
 
   const { data: inserted, error } = await supabase
