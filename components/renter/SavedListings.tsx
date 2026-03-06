@@ -1,77 +1,106 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
 
-const initialSaved = [
-  {
-    id: 1,
-    image: "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=500&q=75",
-    city: "Toronto, ON",
-    neighbourhood: "Downtown / Spadina",
-    type: "Condo",
-    price: 2200,
-    landlordName: "James T.",
-    verified: true,
-    savedDate: "Mar 2, 2026",
-    tag: "Near UofT",
-  },
-  {
-    id: 2,
-    image: "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=500&q=75",
-    city: "Waterloo, ON",
-    neighbourhood: "Uptown Waterloo",
-    type: "Private Room",
-    price: 850,
-    landlordName: "Raj P.",
-    verified: true,
-    savedDate: "Mar 1, 2026",
-    tag: "Student Friendly",
-  },
-  {
-    id: 3,
-    image: "https://images.unsplash.com/photo-1493809842364-78817add7ffb?w=500&q=75",
-    city: "Montréal, QC",
-    neighbourhood: "Plateau-Mont-Royal",
-    type: "Basement",
-    price: 1100,
-    landlordName: "Marie L.",
-    verified: true,
-    savedDate: "Feb 28, 2026",
-    tag: "Near McGill",
-  },
-  {
-    id: 4,
-    image: "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=500&q=75",
-    city: "Ottawa, ON",
-    neighbourhood: "Sandy Hill",
-    type: "Apartment",
-    price: 1600,
-    landlordName: "Fatima A.",
-    verified: true,
-    savedDate: "Feb 25, 2026",
-    tag: "Near uOttawa",
-  },
-];
+type SavedListing = {
+  id: string;
+  savedId: string;
+  savedAt: string;
+  title: string;
+  image: string | null;
+  city: string;
+  neighbourhood: string;
+  type: string;
+  price: number;
+  landlordName: string;
+  landlordEmail?: string | null;
+  verified: boolean;
+  tag: string;
+};
+
+const fallbackImage = "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=500&q=75";
 
 export default function SavedListings() {
-  const [saved, setSaved] = useState(initialSaved);
+  const [saved, setSaved] = useState<SavedListing[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  function remove(id: number) {
-    setSaved((prev) => prev.filter((l) => l.id !== id));
+  async function getToken(): Promise<string | null> {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    return session?.access_token ?? null;
+  }
+
+  useEffect(() => {
+    async function loadSaved() {
+      setLoading(true);
+      setError("");
+      try {
+        const token = await getToken();
+        if (!token) {
+          setSaved([]);
+          return;
+        }
+
+        const response = await fetch("/api/verification/notify-upload?purpose=saved-listings", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const payload = (await response.json()) as { ok: boolean; error?: string; listings?: SavedListing[] };
+        if (!response.ok || !payload.ok) {
+          setError(payload.error ?? "Failed to load saved listings.");
+          return;
+        }
+
+        setSaved(payload.listings ?? []);
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : "Failed to load saved listings.");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    void loadSaved();
+  }, []);
+
+  async function remove(listingId: string) {
+    setError("");
+    const token = await getToken();
+    if (!token) {
+      setError("Please login to manage saved listings.");
+      return;
+    }
+
+    const response = await fetch("/api/verification/notify-upload?purpose=toggle-save", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ listingId }),
+    });
+    const payload = (await response.json()) as { ok: boolean; error?: string };
+    if (!response.ok || !payload.ok) {
+      setError(payload.error ?? "Failed to remove saved listing.");
+      return;
+    }
+
+    setSaved((prev) => prev.filter((listing) => listing.id !== listingId));
   }
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">Saved Listings</h2>
-          <p className="text-sm text-slate-500 mt-0.5">{saved.length} propert{saved.length !== 1 ? "ies" : "y"} saved</p>
-        </div>
+      <div>
+        <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">Saved Listings</h2>
+        <p className="text-sm text-slate-500 mt-0.5">{saved.length} propert{saved.length !== 1 ? "ies" : "y"} saved</p>
       </div>
 
-      {saved.length === 0 ? (
+      {loading && <div className="text-sm text-slate-500">Loading saved listings...</div>}
+      {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+
+      {!loading && saved.length === 0 ? (
         <div className="text-center py-20 text-slate-400 bg-white rounded-2xl border border-slate-100">
-          <div className="text-5xl mb-3">🔖</div>
           <p className="font-semibold text-slate-600 text-lg">No saved listings</p>
           <p className="text-sm mt-1">Listings you save will appear here.</p>
         </div>
@@ -79,13 +108,8 @@ export default function SavedListings() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
           {saved.map((listing) => (
             <div key={listing.id} className="bg-white rounded-2xl border border-slate-100 overflow-hidden hover:shadow-md transition-all duration-200 flex">
-              {/* Image */}
               <div className="relative w-32 flex-shrink-0 overflow-hidden">
-                <img
-                  src={listing.image}
-                  alt={listing.type}
-                  className="w-full h-full object-cover"
-                />
+                <img src={listing.image ?? fallbackImage} alt={listing.type} className="w-full h-full object-cover" />
                 <div className="absolute top-2 left-2">
                   <span className="px-1.5 py-0.5 bg-slate-900/70 text-white text-xs font-medium rounded-md">
                     {listing.type}
@@ -93,7 +117,6 @@ export default function SavedListings() {
                 </div>
               </div>
 
-              {/* Content */}
               <div className="flex-1 p-4 min-w-0">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
@@ -101,7 +124,7 @@ export default function SavedListings() {
                     <p className="text-xs text-slate-500 mt-0.5 truncate">📍 {listing.neighbourhood}, {listing.city}</p>
                   </div>
                   <button
-                    onClick={() => remove(listing.id)}
+                    onClick={() => void remove(listing.id)}
                     className="flex-shrink-0 p-1.5 rounded-lg hover:bg-red-50 text-slate-300 hover:text-red-400 transition-colors"
                     title="Remove from saved"
                   >
@@ -111,10 +134,9 @@ export default function SavedListings() {
                   </button>
                 </div>
 
-                {/* Landlord */}
                 <div className="flex items-center gap-1.5 mt-2">
                   <div className="w-5 h-5 rounded-full bg-gradient-to-br from-teal-400 to-cyan-500 flex items-center justify-center text-white text-xs font-bold">
-                    {listing.landlordName.charAt(0)}
+                    {listing.landlordName.charAt(0).toUpperCase()}
                   </div>
                   <span className="text-xs text-slate-600">{listing.landlordName}</span>
                   {listing.verified && (
@@ -127,8 +149,15 @@ export default function SavedListings() {
                 </div>
 
                 <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-50">
-                  <p className="text-xs text-slate-400">Saved {listing.savedDate}</p>
-                  <button className="px-3 py-1 bg-teal-500 hover:bg-teal-600 text-white text-xs font-semibold rounded-lg transition-colors">
+                  <p className="text-xs text-slate-400">Saved {new Date(listing.savedAt).toLocaleDateString()}</p>
+                  <button
+                    onClick={() => {
+                      if (listing.landlordEmail) {
+                        window.location.href = `mailto:${listing.landlordEmail}?subject=RentShield Listing: ${encodeURIComponent(listing.title)}`;
+                      }
+                    }}
+                    className="px-3 py-1 bg-teal-500 hover:bg-teal-600 text-white text-xs font-semibold rounded-lg transition-colors"
+                  >
                     Contact
                   </button>
                 </div>

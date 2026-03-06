@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import LandlordSidebar, { LandlordTab } from "@/components/landlord/LandlordSidebar";
 import LandlordDashboard from "@/components/landlord/LandlordDashboard";
 import VerificationCenter from "@/components/landlord/VerificationCenter";
-import AddProperty from "@/components/landlord/AddProperty";
-import MyListings from "@/components/landlord/MyListings";
+import AddPropertyDynamic from "@/components/landlord/AddPropertyDynamic";
+import MyListingsDynamic from "@/components/landlord/MyListingsDynamic";
 import TenantRequests from "@/components/landlord/TenantRequests";
 import Messages from "@/components/landlord/Messages";
 import Analytics from "@/components/landlord/Analytics";
@@ -110,8 +110,8 @@ export default function LandlordDashboardPage() {
     switch (activeTab) {
       case "dashboard":    return <LandlordDashboard onNavigate={handleTabChange} userName={profile?.username ?? "Landlord"} />;
       case "verification": return <VerificationCenter profile={profile} onSave={handleSave} saving={saving} />;
-      case "add-property": return <AddProperty />;
-      case "listings":     return <MyListings />;
+      case "add-property": return <AddPropertyDynamic />;
+      case "listings":     return <MyListingsDynamic />;
       case "requests":     return <TenantRequests />;
       case "messages":     return <Messages />;
       case "analytics":    return <Analytics />;
