@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { createOrGetConversation } from "@/lib/chatService";
 
 type SavedListing = {
   id: string;
+  landlordId: string;
   savedId: string;
   savedAt: string;
   title: string;
@@ -21,10 +23,15 @@ type SavedListing = {
 
 const fallbackImage = "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=500&q=75";
 
-export default function SavedListings() {
+type SavedListingsProps = {
+  onOpenConversation: (conversationId: string) => void;
+};
+
+export default function SavedListings({ onOpenConversation }: SavedListingsProps) {
   const [saved, setSaved] = useState<SavedListing[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [contactBusyId, setContactBusyId] = useState<string | null>(null);
 
   async function getToken(): Promise<string | null> {
     const {
@@ -89,6 +96,19 @@ export default function SavedListings() {
     setSaved((prev) => prev.filter((listing) => listing.id !== listingId));
   }
 
+  async function contactLandlord(listing: Pick<SavedListing, "id" | "landlordId">) {
+    setError("");
+    try {
+      setContactBusyId(listing.id);
+      const conversation = await createOrGetConversation(listing.landlordId, listing.id);
+      onOpenConversation(conversation.id);
+    } catch (contactError) {
+      setError(contactError instanceof Error ? contactError.message : "Unable to start conversation.");
+    } finally {
+      setContactBusyId(null);
+    }
+  }
+
   return (
     <div className="space-y-5">
       <div>
@@ -151,14 +171,11 @@ export default function SavedListings() {
                 <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-50">
                   <p className="text-xs text-slate-400">Saved {new Date(listing.savedAt).toLocaleDateString()}</p>
                   <button
-                    onClick={() => {
-                      if (listing.landlordEmail) {
-                        window.location.href = `mailto:${listing.landlordEmail}?subject=RentShield Listing: ${encodeURIComponent(listing.title)}`;
-                      }
-                    }}
+                    onClick={() => void contactLandlord(listing)}
+                    disabled={contactBusyId === listing.id}
                     className="px-3 py-1 bg-teal-500 hover:bg-teal-600 text-white text-xs font-semibold rounded-lg transition-colors"
                   >
-                    Contact
+                    {contactBusyId === listing.id ? "Opening..." : "Contact"}
                   </button>
                 </div>
               </div>

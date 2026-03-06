@@ -85,6 +85,7 @@ export async function GET(request: Request) {
         created_at,
         landlord_listings!renter_saved_listings_listing_id_fkey (
           id,
+          landlord_id,
           title,
           property_type,
           street_address,
@@ -124,6 +125,7 @@ export async function GET(request: Request) {
 
         const typedListing = listingRaw as {
           id: string;
+          landlord_id: string;
           title: string;
           property_type: string;
           street_address: string;
@@ -157,6 +159,7 @@ export async function GET(request: Request) {
           savedId: row.id,
           savedAt: row.created_at,
           id: typedListing.id,
+          landlordId: typedListing.landlord_id,
           title: typedListing.title,
           type: typedListing.property_type,
           city: typedListing.city,

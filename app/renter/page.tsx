@@ -13,6 +13,7 @@ import Settings from "@/components/renter/Settings";
 import { useRouter } from "next/navigation";
 import { getAuthIdentity, getOrCreateRenterProfile, saveRenterProfile } from "@/lib/profileService";
 import { supabase } from "@/lib/supabaseClient";
+import { fetchUnreadCountsByConversation } from "@/lib/chatService";
 import type { RenterProfileRecord } from "@/types/profiles";
 
 const tabTitles: Record<Tab, string> = {
@@ -31,10 +32,12 @@ const allowedWhenUnverified: Tab[] = ["profile", "settings", "verification"];
 export default function RenterDashboardPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [profile, setProfile] = useState<RenterProfileRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [accessMessage, setAccessMessage] = useState("");
+  const [unreadMessages, setUnreadMessages] = useState(0);
 
   useEffect(() => {
     async function load() {
@@ -59,6 +62,35 @@ export default function RenterDashboardPage() {
 
     load();
   }, [router]);
+
+  useEffect(() => {
+    if (!profile?.id) {
+      setUnreadMessages(0);
+      return;
+    }
+
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const unreadMap = await fetchUnreadCountsByConversation();
+        if (cancelled) return;
+        const total = Object.values(unreadMap).reduce((sum, count) => sum + count, 0);
+        setUnreadMessages(total);
+      } catch {
+        if (!cancelled) setUnreadMessages(0);
+      }
+    };
+
+    void refresh();
+    const interval = setInterval(() => {
+      void refresh();
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [profile?.id]);
 
   async function handleSave(updates: Partial<Omit<RenterProfileRecord, "id" | "created_at" | "updated_at">>) {
     if (!profile) {
@@ -98,6 +130,15 @@ export default function RenterDashboardPage() {
     }
     setAccessMessage("");
     setActiveTab(tab);
+    if (tab !== "messages") {
+      setSelectedConversationId(null);
+    }
+  }
+
+  function openConversation(conversationId: string) {
+    setActiveTab("messages");
+    setSelectedConversationId(conversationId);
+    setAccessMessage("");
   }
 
   const renterInitials = (profile?.username ?? "RS")
@@ -116,10 +157,10 @@ export default function RenterDashboardPage() {
     switch (activeTab) {
       case "dashboard":    return <DashboardOverview onNavigate={handleTabChange} userName={profile?.username ?? "Renter"} />;
       case "profile":      return <RenterProfile key={profile?.updated_at ?? "renter-profile"} profile={profile} onSave={handleSave} saving={saving} />;
-      case "listings":     return <RenterListings />;
-      case "saved":        return <SavedListings />;
+      case "listings":     return <RenterListings onOpenConversation={openConversation} />;
+      case "saved":        return <SavedListings onOpenConversation={openConversation} />;
       case "roommate":     return <RoommateFinder />;
-      case "messages":     return <Messages />;
+      case "messages":     return <Messages initialConversationId={selectedConversationId} />;
       case "verification": return <VerificationStatus isVerified={Boolean(profile?.is_verified)} onVerify={handleVerify} verifying={saving} />;
       case "settings":     return <Settings key={profile?.updated_at ?? "renter-settings"} profile={profile} onSave={handleSave} saving={saving} />;
       default:             return null;
@@ -136,7 +177,7 @@ export default function RenterDashboardPage() {
       <RenterSidebar
         activeTab={activeTab}
         onTabChange={handleTabChange}
-        unreadMessages={2}
+        unreadMessages={unreadMessages}
         userName={profile?.username}
         userEmail={profile?.email}
         verificationLocked={verificationLocked}

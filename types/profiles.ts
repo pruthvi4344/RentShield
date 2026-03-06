@@ -12,6 +12,7 @@ export type RenterProfileRecord = {
   email: string;
   username: string;
   is_verified: boolean;
+  is_roommate_profile_public: boolean;
   university: string | null;
   city: string | null;
   move_in_date: string | null;
@@ -20,6 +21,7 @@ export type RenterProfileRecord = {
   lifestyle: string[] | null;
   bio: string | null;
   room_preference: string | null;
+  roommate_preferred_gender: string | null;
   gender: string | null;
   country: string | null;
   phone: string | null;

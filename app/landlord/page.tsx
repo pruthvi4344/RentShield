@@ -14,6 +14,7 @@ import LandlordSettings from "@/components/landlord/Settings";
 import { useRouter } from "next/navigation";
 import { getAuthIdentity, getOrCreateLandlordProfile, saveLandlordProfile } from "@/lib/profileService";
 import { supabase } from "@/lib/supabaseClient";
+import { fetchUnreadCountsByConversation } from "@/lib/chatService";
 import type { LandlordProfileRecord } from "@/types/profiles";
 
 const tabTitles: Record<LandlordTab, string> = {
@@ -37,6 +38,7 @@ export default function LandlordDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [accessMessage, setAccessMessage] = useState("");
+  const [unreadMessages, setUnreadMessages] = useState(0);
 
   useEffect(() => {
     async function load() {
@@ -61,6 +63,35 @@ export default function LandlordDashboardPage() {
 
     load();
   }, [router]);
+
+  useEffect(() => {
+    if (!profile?.id) {
+      setUnreadMessages(0);
+      return;
+    }
+
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const unreadMap = await fetchUnreadCountsByConversation();
+        if (cancelled) return;
+        const total = Object.values(unreadMap).reduce((sum, count) => sum + count, 0);
+        setUnreadMessages(total);
+      } catch {
+        if (!cancelled) setUnreadMessages(0);
+      }
+    };
+
+    void refresh();
+    const interval = setInterval(() => {
+      void refresh();
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [profile?.id]);
 
   async function handleSave(updates: Partial<Omit<LandlordProfileRecord, "id" | "created_at" | "updated_at">>) {
     if (!profile) {
@@ -130,7 +161,7 @@ export default function LandlordDashboardPage() {
       <LandlordSidebar
         activeTab={activeTab}
         onTabChange={handleTabChange}
-        unreadMessages={5}
+        unreadMessages={unreadMessages}
         pendingRequests={2}
         userName={profile?.username}
         userEmail={profile?.email}

@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { createOrGetConversation } from "@/lib/chatService";
 
 type ListingCard = {
   id: string;
+  landlordId: string;
   title: string;
   image: string | null;
   city: string;
@@ -39,7 +41,11 @@ type ListingDetail = ListingCard & {
 const types = ["All Types", "Apartment", "Condo", "Basement", "Private Room", "Shared Room"];
 const fallbackImage = "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=500&q=75";
 
-export default function RenterListings() {
+type RenterListingsProps = {
+  onOpenConversation: (conversationId: string) => void;
+};
+
+export default function RenterListings({ onOpenConversation }: RenterListingsProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const listingId = searchParams.get("listingId");
@@ -53,6 +59,7 @@ export default function RenterListings() {
   const [typeFilter, setTypeFilter] = useState("All Types");
   const [maxPrice, setMaxPrice] = useState(3000);
   const [furnishedFilter, setFurnishedFilter] = useState<"all" | "furnished" | "unfurnished">("all");
+  const [contactBusyId, setContactBusyId] = useState<string | null>(null);
 
   async function getAccessToken(): Promise<string | null> {
     const {
@@ -172,6 +179,19 @@ export default function RenterListings() {
     });
   }
 
+  async function contactLandlord(listing: Pick<ListingCard, "id" | "title" | "landlordId">) {
+    setLoadError("");
+    try {
+      setContactBusyId(listing.id);
+      const conversation = await createOrGetConversation(listing.landlordId, listing.id);
+      onOpenConversation(conversation.id);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Unable to start conversation.");
+    } finally {
+      setContactBusyId(null);
+    }
+  }
+
   const cities = useMemo(() => {
     const unique = Array.from(new Set(listings.map((listing) => listing.city).filter(Boolean)));
     return ["All Cities", ...unique];
@@ -239,16 +259,11 @@ export default function RenterListings() {
                     {saved.includes(selectedListing.id) ? "Saved" : "Save Listing"}
                   </button>
                   <button
-                    onClick={() => {
-                      if (selectedListing.landlordEmail) {
-                        window.location.href = `mailto:${selectedListing.landlordEmail}?subject=RentShield Listing: ${encodeURIComponent(selectedListing.title)}`;
-                        return;
-                      }
-                      setLoadError("Landlord contact email is not available for this listing.");
-                    }}
+                    onClick={() => void contactLandlord(selectedListing)}
+                    disabled={contactBusyId === selectedListing.id}
                     className="px-3 py-1.5 bg-teal-500 hover:bg-teal-600 text-white text-xs font-semibold rounded-lg transition-colors"
                   >
-                    Contact
+                    {contactBusyId === selectedListing.id ? "Opening..." : "Contact"}
                   </button>
                 </div>
               </div>
@@ -439,13 +454,12 @@ export default function RenterListings() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (listing.landlordEmail) {
-                          window.location.href = `mailto:${listing.landlordEmail}?subject=RentShield Listing: ${encodeURIComponent(listing.title)}`;
-                        }
+                        void contactLandlord(listing);
                       }}
+                      disabled={contactBusyId === listing.id}
                       className="px-3 py-1.5 bg-teal-500 hover:bg-teal-600 text-white text-xs font-semibold rounded-lg transition-colors"
                     >
-                      Contact
+                      {contactBusyId === listing.id ? "Opening..." : "Contact"}
                     </button>
                   </div>
                 </div>
