@@ -123,7 +123,7 @@ export default function Footer() {
             </div>
           ))}
         </div>
-
+{/* test commit */}
         {/* Bottom bar */}
         <div className="border-t border-white/5 py-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs">
           <p>© 2025 RentShield Inc. All rights reserved. Built for newcomers, by people who understand the journey.</p>
