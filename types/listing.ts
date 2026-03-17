@@ -1,4 +1,5 @@
 export type ListingStatus = "pending" | "active" | "rented" | "inactive";
+export type ListingMediaType = "image" | "video" | "panorama";
 
 export type LandlordListingRecord = {
   id: string;
@@ -15,7 +16,18 @@ export type LandlordListingRecord = {
   monthly_rent: number;
   security_deposit: number | null;
   utilities_included: boolean;
+  internet_included: boolean;
+  parking_included: boolean;
   amenities: string[];
+  discount_percentage: number | null;
+  discount_duration_months: number | null;
+  limited_time_offer_title: string | null;
+  limited_time_offer_description: string | null;
+  limited_time_offer_expires_at: string | null;
+  featured_listing: boolean;
+  matterport_url: string | null;
+  matterport_embed: string | null;
+  tour_360_storage_path: string | null;
   available_from: string | null;
   lease_duration_months: number | null;
   status: ListingStatus;
@@ -34,6 +46,16 @@ export type ListingPhotoRecord = {
   created_at: string;
 };
 
+export type ListingMediaRecord = {
+  id: string;
+  listing_id: string;
+  landlord_id: string;
+  storage_path: string;
+  media_type: ListingMediaType;
+  sort_order: number;
+  created_at: string;
+};
+
 export type CreateLandlordListingInput = {
   title: string;
   property_type: string;
@@ -47,7 +69,18 @@ export type CreateLandlordListingInput = {
   monthly_rent: number;
   security_deposit?: number | null;
   utilities_included: boolean;
+  internet_included: boolean;
+  parking_included: boolean;
   amenities: string[];
+  discount_percentage?: number | null;
+  discount_duration_months?: number | null;
+  limited_time_offer_title?: string | null;
+  limited_time_offer_description?: string | null;
+  limited_time_offer_expires_at?: string | null;
+  featured_listing: boolean;
+  matterport_url?: string | null;
+  matterport_embed?: string | null;
+  tour_360_storage_path?: string | null;
   available_from?: string | null;
   lease_duration_months?: number | null;
   status?: ListingStatus;
@@ -56,4 +89,7 @@ export type CreateLandlordListingInput = {
 export type LandlordListingWithCover = LandlordListingRecord & {
   cover_photo_url: string | null;
   photo_count: number;
+  video_count: number;
+  media_count: number;
+  special_offer_badge: string | null;
 };

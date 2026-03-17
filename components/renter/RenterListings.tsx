@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { createOrGetConversation } from "@/lib/chatService";
+import Viewer360 from "@/components/Viewer360";
 
 type ListingCard = {
   id: string;
@@ -22,6 +23,8 @@ type ListingCard = {
   verified: boolean;
   tag: string;
   furnished: boolean;
+  featuredListing?: boolean;
+  specialOfferBadge?: string | null;
 };
 
 type ListingDetail = ListingCard & {
@@ -34,8 +37,17 @@ type ListingDetail = ListingCard & {
   leaseDurationMonths: number | null;
   images: string[];
   photoCount: number;
+  videoCount?: number;
+  videos?: string[];
+  tour360Url?: string | null;
   createdAt: string;
   status: string;
+  internetIncluded?: boolean;
+  parkingIncluded?: boolean;
+  limitedTimeOfferDescription?: string | null;
+  limitedTimeOfferExpiresAt?: string | null;
+  matterportUrl?: string | null;
+  matterportEmbed?: string | null;
 };
 
 const types = ["All Types", "Apartment", "Condo", "Basement", "Private Room", "Shared Room"];
@@ -52,6 +64,7 @@ export default function RenterListings({ onOpenConversation }: RenterListingsPro
   const [saved, setSaved] = useState<string[]>([]);
   const [listings, setListings] = useState<ListingCard[]>([]);
   const [selectedListing, setSelectedListing] = useState<ListingDetail | null>(null);
+  const [activeMediaTab, setActiveMediaTab] = useState<"photos" | "videos" | "tour360">("photos");
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -149,6 +162,23 @@ export default function RenterListings({ onOpenConversation }: RenterListingsPro
     }
   }, [listingId]);
 
+  useEffect(() => {
+    if (!selectedListing) {
+      setActiveMediaTab("photos");
+      return;
+    }
+
+    if ((selectedListing.images?.length ?? 0) > 0) {
+      setActiveMediaTab("photos");
+    } else if ((selectedListing.videos?.length ?? 0) > 0) {
+      setActiveMediaTab("videos");
+    } else if (selectedListing.tour360Url) {
+      setActiveMediaTab("tour360");
+    } else {
+      setActiveMediaTab("photos");
+    }
+  }, [selectedListing]);
+
   async function toggleSave(id: string) {
     setLoadError("");
     const token = await getAccessToken();
@@ -213,6 +243,10 @@ export default function RenterListings({ onOpenConversation }: RenterListingsPro
         : selectedListing?.image
           ? [selectedListing.image]
           : [fallbackImage];
+    const videos = selectedListing?.videos ?? [];
+    const hasPhotos = (selectedListing?.images?.length ?? 0) > 0 || Boolean(selectedListing?.image);
+    const hasVideos = videos.length > 0;
+    const hasTour360 = Boolean(selectedListing?.tour360Url);
 
     return (
       <div className="space-y-5">
@@ -234,19 +268,105 @@ export default function RenterListings({ onOpenConversation }: RenterListingsPro
         {!loadingDetail && !loadError && selectedListing && (
           <div className="space-y-5">
             <section className="bg-white rounded-2xl border border-slate-100 p-4">
-              <h3 className="text-sm font-semibold text-slate-700 mb-3">All Photos ({images.length})</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                {images.map((image, index) => (
-                  <div key={`${image}-${index}`} className="rounded-xl overflow-hidden border border-slate-100 bg-slate-100">
-                    <img src={image} alt={`${selectedListing.title} ${index + 1}`} className="w-full h-52 object-cover" />
-                  </div>
-                ))}
+              <div className="mb-4 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveMediaTab("photos")}
+                  className={`rounded-full px-3 py-1.5 text-sm font-semibold transition-colors ${
+                    activeMediaTab === "photos" ? "bg-teal-500 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  Photos ({hasPhotos ? images.length : 0})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveMediaTab("videos")}
+                  className={`rounded-full px-3 py-1.5 text-sm font-semibold transition-colors ${
+                    activeMediaTab === "videos" ? "bg-teal-500 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  Videos ({videos.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveMediaTab("tour360")}
+                  className={`rounded-full px-3 py-1.5 text-sm font-semibold transition-colors ${
+                    activeMediaTab === "tour360" ? "bg-teal-500 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  360 Tour
+                </button>
               </div>
+
+              {activeMediaTab === "photos" && hasPhotos && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {images.map((image, index) => (
+                    <div key={`${image}-${index}`} className="rounded-xl overflow-hidden border border-slate-100 bg-slate-100">
+                      <img src={image} alt={`${selectedListing.title} ${index + 1}`} className="w-full h-52 object-cover" />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {activeMediaTab === "videos" && hasVideos && (
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  {videos.map((video, index) => (
+                    <div key={`${video}-${index}`} className="overflow-hidden rounded-xl border border-slate-100 bg-slate-50">
+                      <video src={video} controls playsInline preload="metadata" className="h-full max-h-[420px] w-full bg-black object-contain" />
+                      <div className="border-t border-slate-100 px-3 py-2 text-xs text-slate-500">
+                        If the browser cannot play this file inline, open it in a new tab.
+                        <a href={video} target="_blank" rel="noreferrer" className="ml-1 font-semibold text-teal-600 underline underline-offset-2">
+                          Open video
+                        </a>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {activeMediaTab === "tour360" && hasTour360 && (
+                <Viewer360 src={selectedListing.tour360Url!} className="overflow-hidden rounded-xl border border-slate-100" />
+              )}
+
+              {activeMediaTab === "photos" && !hasPhotos && (
+                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500">
+                  No photos available for this listing.
+                </div>
+              )}
+              {activeMediaTab === "videos" && !hasVideos && (
+                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500">
+                  No videos uploaded for this listing yet.
+                </div>
+              )}
+              {activeMediaTab === "tour360" && !hasTour360 && (
+                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500">
+                  No 360 tour attached for this listing.
+                </div>
+              )}
             </section>
 
             <section className="bg-white rounded-2xl border border-slate-100 p-5">
               <div className="flex items-start justify-between gap-3 mb-2">
-                <h3 className="text-lg font-bold text-slate-900">{selectedListing.title}</h3>
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {selectedListing.featuredListing && (
+                      <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
+                        Featured Property
+                      </span>
+                    )}
+                    {selectedListing.specialOfferBadge && (
+                      <span className="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">
+                        {selectedListing.specialOfferBadge}
+                      </span>
+                    )}
+                    {selectedListing.limitedTimeOfferExpiresAt && (
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                        Ends {selectedListing.limitedTimeOfferExpiresAt}
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-900">{selectedListing.title}</h3>
+                </div>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => void toggleSave(selectedListing.id)}
@@ -267,7 +387,17 @@ export default function RenterListings({ onOpenConversation }: RenterListingsPro
                   </button>
                 </div>
               </div>
-              <p className="text-sm text-slate-500 mb-4">📍 {selectedListing.neighbourhood}, {selectedListing.city}</p>
+              <p className="text-sm text-slate-500 mb-4">Location: {selectedListing.neighbourhood}, {selectedListing.city}</p>
+              {(selectedListing.specialOfferBadge || selectedListing.limitedTimeOfferDescription) && (
+                <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
+                  {selectedListing.specialOfferBadge && (
+                    <p className="text-sm font-semibold text-rose-700">{selectedListing.specialOfferBadge}</p>
+                  )}
+                  {selectedListing.limitedTimeOfferDescription && (
+                    <p className="mt-1 text-sm text-rose-600">{selectedListing.limitedTimeOfferDescription}</p>
+                  )}
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
                 <div><p className="text-slate-400 text-xs">Price</p><p className="font-semibold text-slate-800">${selectedListing.price.toLocaleString()}/mo</p></div>
                 <div><p className="text-slate-400 text-xs">Type</p><p className="font-semibold text-slate-800">{selectedListing.type}</p></div>
@@ -277,8 +407,27 @@ export default function RenterListings({ onOpenConversation }: RenterListingsPro
                 <div><p className="text-slate-400 text-xs">Security Deposit</p><p className="font-semibold text-slate-800">{selectedListing.deposit ? `$${selectedListing.deposit.toLocaleString()}` : "-"}</p></div>
                 <div><p className="text-slate-400 text-xs">Furnished</p><p className="font-semibold text-slate-800 capitalize">{selectedListing.furnishedStatus}</p></div>
                 <div><p className="text-slate-400 text-xs">Utilities Included</p><p className="font-semibold text-slate-800">{selectedListing.utilitiesIncluded ? "Yes" : "No"}</p></div>
+                <div><p className="text-slate-400 text-xs">Internet Included</p><p className="font-semibold text-slate-800">{selectedListing.internetIncluded ? "Yes" : "No"}</p></div>
+                <div><p className="text-slate-400 text-xs">Parking Included</p><p className="font-semibold text-slate-800">{selectedListing.parkingIncluded ? "Yes" : "No"}</p></div>
                 <div><p className="text-slate-400 text-xs">Available From</p><p className="font-semibold text-slate-800">{selectedListing.availableFrom ?? "-"}</p></div>
               </div>
+              {(selectedListing.matterportUrl || selectedListing.matterportEmbed) && (
+                <div className="mt-4 rounded-2xl border border-teal-100 bg-teal-50 px-4 py-3">
+                  <p className="text-sm font-semibold text-teal-700">3D Tour Available</p>
+                  {selectedListing.matterportUrl ? (
+                    <a
+                      href={selectedListing.matterportUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 inline-flex text-sm font-medium text-teal-700 underline underline-offset-2"
+                    >
+                      Open 3D Tour
+                    </a>
+                  ) : (
+                    <p className="mt-1 text-sm text-teal-700">Interactive 3D tour embed is attached to this listing.</p>
+                  )}
+                </div>
+              )}
               <div className="mt-4">
                 <p className="text-slate-400 text-xs mb-1">Amenities</p>
                 <div className="flex flex-wrap gap-2">
@@ -478,3 +627,4 @@ export default function RenterListings({ onOpenConversation }: RenterListingsPro
     </div>
   );
 }
+

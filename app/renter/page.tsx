@@ -159,7 +159,7 @@ export default function RenterDashboardPage() {
       case "profile":      return <RenterProfile key={profile?.updated_at ?? "renter-profile"} profile={profile} onSave={handleSave} saving={saving} />;
       case "listings":     return <RenterListings onOpenConversation={openConversation} />;
       case "saved":        return <SavedListings onOpenConversation={openConversation} />;
-      case "roommate":     return <RoommateFinder />;
+      case "roommate":     return <RoommateFinder onOpenConversation={openConversation} />;
       case "messages":     return <Messages initialConversationId={selectedConversationId} />;
       case "verification": return <VerificationStatus isVerified={Boolean(profile?.is_verified)} onVerify={handleVerify} verifying={saving} />;
       case "settings":     return <Settings key={profile?.updated_at ?? "renter-settings"} profile={profile} onSave={handleSave} saving={saving} />;

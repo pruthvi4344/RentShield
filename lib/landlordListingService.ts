@@ -3,10 +3,13 @@ import type {
   CreateLandlordListingInput,
   LandlordListingRecord,
   LandlordListingWithCover,
+  ListingMediaRecord,
   ListingPhotoRecord,
 } from "@/types/listing";
 
 const listingPhotoBucket = "listing-photos";
+const listingMediaBucket = "listing-media";
+const propertyMediaBucket = "property-media";
 
 function sanitizeFileName(fileName: string): string {
   return fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -15,7 +18,8 @@ function sanitizeFileName(fileName: string): string {
 export async function createLandlordListing(
   landlordId: string,
   input: CreateLandlordListingInput,
-  photos: File[],
+  mediaFiles: File[],
+  onUploadProgress?: (message: string) => void,
 ): Promise<LandlordListingRecord> {
   const { data: listing, error: listingError } = await supabase
     .from("landlord_listings")
@@ -30,30 +34,55 @@ export async function createLandlordListing(
     throw new Error(listingError?.message ?? "Failed to create listing.");
   }
 
-  if (photos.length > 0) {
-    const photoRows: Array<Pick<ListingPhotoRecord, "listing_id" | "landlord_id" | "storage_path" | "sort_order">> = [];
-    for (let index = 0; index < photos.length; index += 1) {
-      const file = photos[index];
-      const path = `${landlordId}/${listing.id}/${Date.now()}-${index}-${sanitizeFileName(file.name)}`;
+  if (mediaFiles.length > 0) {
+    const mediaRows: Array<Pick<ListingMediaRecord, "listing_id" | "landlord_id" | "storage_path" | "media_type" | "sort_order">> = [];
+    let panoramaPath: string | null = null;
+    for (let index = 0; index < mediaFiles.length; index += 1) {
+      const file = mediaFiles[index];
+      const mediaType = file.type.startsWith("video/")
+        ? "video"
+        : file.name.includes("__panorama__")
+          ? "panorama"
+          : "image";
+      const folder = mediaType === "video" ? "videos" : mediaType === "panorama" ? "panorama" : "images";
+      const path = `${listing.id}/${folder}/${Date.now()}-${index}-${sanitizeFileName(file.name)}`;
+      onUploadProgress?.(`Uploading ${mediaType} ${index + 1} of ${mediaFiles.length}...`);
       const { error: uploadError } = await supabase.storage
-        .from(listingPhotoBucket)
+        .from(propertyMediaBucket)
         .upload(path, file, { upsert: false, contentType: file.type || undefined });
 
       if (uploadError) {
         throw new Error(uploadError.message);
       }
 
-      photoRows.push({
+      mediaRows.push({
         listing_id: listing.id,
         landlord_id: landlordId,
         storage_path: path,
+        media_type: mediaType,
         sort_order: index,
       });
+
+      if (mediaType === "panorama" && !panoramaPath) {
+        panoramaPath = path;
+      }
     }
 
-    const { error: photoInsertError } = await supabase.from("listing_photos").insert(photoRows);
-    if (photoInsertError) {
-      throw new Error(photoInsertError.message);
+    const { error: mediaInsertError } = await supabase.from("listing_media").insert(mediaRows);
+    if (mediaInsertError) {
+      throw new Error(mediaInsertError.message);
+    }
+
+    if (panoramaPath) {
+      const { error: panoramaUpdateError } = await supabase
+        .from("landlord_listings")
+        .update({ tour_360_storage_path: panoramaPath })
+        .eq("id", listing.id)
+        .eq("landlord_id", landlordId);
+
+      if (panoramaUpdateError) {
+        throw new Error(panoramaUpdateError.message);
+      }
     }
   }
 
@@ -63,7 +92,7 @@ export async function createLandlordListing(
 export async function getLandlordListings(landlordId: string): Promise<LandlordListingWithCover[]> {
   const { data, error } = await supabase
     .from("landlord_listings")
-    .select("*, listing_photos(id, storage_path, sort_order)")
+    .select("*, listing_media(id, storage_path, media_type, sort_order), listing_photos(id, storage_path, sort_order)")
     .eq("landlord_id", landlordId)
     .order("created_at", { ascending: false });
 
@@ -72,24 +101,42 @@ export async function getLandlordListings(landlordId: string): Promise<LandlordL
   }
 
   const mapped = (data ?? []) as Array<
-    LandlordListingRecord & { listing_photos?: Array<Pick<ListingPhotoRecord, "id" | "storage_path" | "sort_order">> }
+    LandlordListingRecord & {
+      listing_media?: Array<Pick<ListingMediaRecord, "id" | "storage_path" | "media_type" | "sort_order">>;
+      listing_photos?: Array<Pick<ListingPhotoRecord, "id" | "storage_path" | "sort_order">>;
+    }
   >;
 
   const withCover = await Promise.all(
     mapped.map(async (listing) => {
-      const sorted = [...(listing.listing_photos ?? [])].sort((a, b) => a.sort_order - b.sort_order);
-      const firstPhoto = sorted[0];
+      const media = [...(listing.listing_media ?? [])].sort((a, b) => a.sort_order - b.sort_order);
+      const legacyPhotos = [...(listing.listing_photos ?? [])].sort((a, b) => a.sort_order - b.sort_order);
+      const images = media.filter((item) => item.media_type === "image");
+      const videos = media.filter((item) => item.media_type === "video");
+      const panoramas = media.filter((item) => item.media_type === "panorama");
+      const firstPhoto = images[0] ?? legacyPhotos[0];
       let coverUrl: string | null = null;
 
       if (firstPhoto?.storage_path) {
-        const { data: signed } = await supabase.storage.from(listingPhotoBucket).createSignedUrl(firstPhoto.storage_path, 3600);
+        const bucket = "media_type" in firstPhoto ? propertyMediaBucket : listingPhotoBucket;
+        const { data: signed } = await supabase.storage.from(bucket).createSignedUrl(firstPhoto.storage_path, 3600);
         coverUrl = signed?.signedUrl ?? null;
       }
+
+      const specialOfferBadge = listing.featured_listing
+        ? "Featured Property"
+        : listing.discount_percentage
+          ? `First ${listing.discount_duration_months ?? 1} month${(listing.discount_duration_months ?? 1) > 1 ? "s" : ""} ${listing.discount_percentage}% off`
+          : listing.limited_time_offer_title;
 
       return {
         ...listing,
         cover_photo_url: coverUrl,
-        photo_count: sorted.length,
+        photo_count: images.length || legacyPhotos.length,
+        video_count: videos.length,
+        media_count: media.length || legacyPhotos.length,
+        special_offer_badge: specialOfferBadge ?? null,
+        tour_360_storage_path: listing.tour_360_storage_path ?? panoramas[0]?.storage_path ?? null,
       } satisfies LandlordListingWithCover;
     }),
   );
@@ -108,10 +155,27 @@ export async function deleteLandlordListing(landlordId: string, listingId: strin
     .map((photo) => photo.storage_path as string)
     .filter(Boolean);
 
+  const { data: media } = await supabase
+    .from("listing_media")
+    .select("storage_path")
+    .eq("listing_id", listingId)
+    .eq("landlord_id", landlordId);
+
+  const mediaPaths = (media ?? [])
+    .map((item) => item.storage_path as string)
+    .filter(Boolean);
+
   if (paths.length > 0) {
     const { error: removeError } = await supabase.storage.from(listingPhotoBucket).remove(paths);
     if (removeError) {
       throw new Error(removeError.message);
+    }
+  }
+
+  if (mediaPaths.length > 0) {
+    const { error: removeMediaError } = await supabase.storage.from(propertyMediaBucket).remove(mediaPaths);
+    if (removeMediaError) {
+      throw new Error(removeMediaError.message);
     }
   }
 
