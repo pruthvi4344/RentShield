@@ -13,6 +13,7 @@ export type RenterProfileRecord = {
   username: string;
   is_verified: boolean;
   is_roommate_profile_public: boolean;
+  is_published: boolean;
   university: string | null;
   city: string | null;
   move_in_date: string | null;
@@ -28,6 +29,22 @@ export type RenterProfileRecord = {
   avatar_url: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type RoommateRequestStatus = "pending" | "accepted" | "rejected";
+
+export type RoommateRequestRecord = {
+  id: string;
+  sender_id: string;
+  receiver_id: string;
+  status: RoommateRequestStatus;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RoommateRequestWithProfiles = RoommateRequestRecord & {
+  sender_profile: Pick<RenterProfileRecord, "id" | "username" | "email" | "city" | "university" | "gender" | "is_verified"> | null;
+  receiver_profile: Pick<RenterProfileRecord, "id" | "username" | "email" | "city" | "university" | "gender" | "is_verified"> | null;
 };
 
 export type LandlordProfileRecord = {
