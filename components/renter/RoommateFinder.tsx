@@ -20,15 +20,13 @@ type RoommateFinderProps = {
 };
 
 const genderOptions = ["Any", "Male", "Female"];
-const countryOptions = ["India", "Canada", "Nigeria", "Brazil", "Egypt", "South Korea", "Other"];
-const cityOptions = ["Toronto, ON", "Waterloo, ON", "Vancouver, BC", "Montreal, QC", "Ottawa, ON", "Calgary, AB"];
-const universityOptions = [
-  "University of Toronto",
-  "University of Waterloo",
-  "UBC Vancouver",
-  "McGill University",
-  "University of Ottawa",
-  "York University",
+const countryOptions = [
+  "Afghanistan", "Albania", "Algeria", "Argentina", "Australia", "Bangladesh", "Belgium", "Brazil", "Canada",
+  "Chile", "China", "Colombia", "Egypt", "Ethiopia", "France", "Germany", "Ghana", "India", "Indonesia", "Iran",
+  "Iraq", "Ireland", "Italy", "Japan", "Jordan", "Kenya", "Lebanon", "Malaysia", "Mexico", "Morocco", "Nepal",
+  "Netherlands", "New Zealand", "Nigeria", "Pakistan", "Peru", "Philippines", "Portugal", "Saudi Arabia",
+  "Singapore", "South Africa", "South Korea", "Spain", "Sri Lanka", "Sudan", "Syria", "Thailand", "Tunisia",
+  "Turkey", "Uganda", "Ukraine", "United Arab Emirates", "United Kingdom", "United States", "Vietnam", "Zimbabwe",
   "Other",
 ];
 const roomTypeOptions = [
@@ -50,6 +48,14 @@ const lifestyleOptions = [
   "Social",
   "Student only",
   "Pet friendly",
+  "Gym routine",
+  "Work from home",
+  "Religious",
+  "No parties",
+  "Weekend traveler",
+  "Shared cooking",
+  "Music friendly",
+  "Minimalist",
 ];
 
 function initialsFromName(name: string): string {
@@ -88,6 +94,13 @@ function roomTypeLabel(value: string | null): string {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function formatCooldownMessage(rejectedAt: string | null): string {
+  if (!rejectedAt) return "You can send another request after 48 hours";
+  const nextAllowed = new Date(new Date(rejectedAt).getTime() + 48 * 60 * 60 * 1000);
+  if (Number.isNaN(nextAllowed.getTime())) return "You can send another request after 48 hours";
+  return `Available to request again on ${nextAllowed.toLocaleString()}`;
 }
 
 function calculateMatchScore(me: RenterProfileRecord | null, other: RenterProfileRecord): number {
@@ -154,6 +167,7 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
     moveInDate: "",
     roomPreference: "",
     lifestyle: [] as string[],
+    customLifestyle: "",
     bio: "",
   });
 
@@ -179,7 +193,8 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
         budgetMax: mine.budget_max?.toString() ?? "",
         moveInDate: mine.move_in_date ?? "",
         roomPreference: mine.room_preference ?? "",
-        lifestyle: mine.lifestyle ?? [],
+        lifestyle: (mine.lifestyle ?? []).filter((tag) => lifestyleOptions.includes(tag)),
+        customLifestyle: (mine.lifestyle ?? []).filter((tag) => !lifestyleOptions.includes(tag)).join(", "),
         bio: mine.bio ?? "",
       });
 
@@ -223,6 +238,10 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
     setError("");
     setFormError("");
     try {
+      const allLifestyleTags = [
+        ...form.lifestyle,
+        ...form.customLifestyle.split(",").map((tag) => tag.trim()).filter(Boolean),
+      ];
       const updated = await saveRenterProfile(myProfile.id, {
         country: form.country || null,
         university: form.university || null,
@@ -233,7 +252,7 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
         budget_max: budgetMax,
         move_in_date: form.moveInDate || null,
         room_preference: form.roomPreference || null,
-        lifestyle: form.lifestyle,
+        lifestyle: Array.from(new Set(allLifestyleTags)),
         bio: form.bio || null,
         is_published: publish,
         is_roommate_profile_public: publish,
@@ -255,7 +274,7 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
     setRequestBusyId(receiverId);
     setError("");
     try {
-      await sendRoommateRequest(myProfile.id, receiverId);
+      await sendRoommateRequest(receiverId);
       await loadData();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Failed to send request.");
@@ -270,7 +289,7 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
     setRequestBusyId(requestId);
     setError("");
     try {
-      await updateRoommateRequestStatus(requestId, myProfile.id, response);
+      await updateRoommateRequestStatus(requestId, response);
       if (response === "accepted") {
         const conversation = await createOrGetRoommateConversation(senderId);
         onOpenConversation(conversation.id);
@@ -328,6 +347,11 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
     [requests, myProfile],
   );
 
+  const pendingIncomingCount = useMemo(
+    () => incomingRequests.filter((request) => request.status === "pending").length,
+    [incomingRequests],
+  );
+
   const filtered = useMemo(
     () =>
       profiles.filter((profile) => {
@@ -362,7 +386,7 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
       <div className="inline-flex rounded-2xl border border-slate-200 bg-white p-1 shadow-sm">
         {[
           { id: "browse" as const, label: "Browse Profiles" },
-          { id: "requests" as const, label: `Requests (${incomingRequests.filter((request) => request.status === "pending").length})` },
+          { id: "requests" as const, label: `Requests (${pendingIncomingCount})` },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -434,6 +458,7 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
               let actionLabel = "Send Request";
               let actionDisabled = false;
               let actionKind: "send" | "message" | "none" = "send";
+              let helperMessage = "";
 
               if (relatedRequest?.status === "pending") {
                 if (relatedRequest.sender_id === myProfile?.id) {
@@ -449,9 +474,17 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
                 actionLabel = "Message";
                 actionKind = "message";
               } else if (relatedRequest?.status === "rejected") {
-                actionLabel = "Request Rejected";
-                actionDisabled = true;
-                actionKind = "none";
+                const rejectedAt = relatedRequest.rejected_at ? new Date(relatedRequest.rejected_at) : null;
+                const nextAllowed = rejectedAt ? new Date(rejectedAt.getTime() + 48 * 60 * 60 * 1000) : null;
+                if (nextAllowed && nextAllowed > new Date()) {
+                  actionLabel = "Request Rejected";
+                  actionDisabled = true;
+                  actionKind = "none";
+                  helperMessage = formatCooldownMessage(relatedRequest.rejected_at);
+                }
+              } else if (relatedRequest?.status === "expired") {
+                actionLabel = "Request Expired";
+                helperMessage = "Request expired";
               }
 
               return (
@@ -532,6 +565,9 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
                           {expanded === profile.id ? "Hide Profile" : "View Profile"}
                         </button>
                       </div>
+                      {helperMessage && (
+                        <p className="mt-2 text-xs font-medium text-amber-700">{helperMessage}</p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -571,6 +607,8 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
                           <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
                             request.status === "accepted"
                               ? "bg-emerald-50 text-emerald-700"
+                              : request.status === "expired"
+                                ? "bg-slate-100 text-slate-600"
                               : request.status === "rejected"
                                 ? "bg-rose-50 text-rose-700"
                                 : "bg-amber-50 text-amber-700"
@@ -616,6 +654,10 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
                         >
                           Message
                         </button>
+                      ) : request.status === "expired" ? (
+                        <span className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-500">
+                          Request expired
+                        </span>
                       ) : (
                         <span className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-500">
                           Rejected
@@ -655,18 +697,18 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
                     <option key={country} value={country}>{country}</option>
                   ))}
                 </select>
-                <select value={form.university} onChange={(e) => setForm((prev) => ({ ...prev, university: e.target.value }))} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500">
-                  <option value="">Select university</option>
-                  {universityOptions.map((university) => (
-                    <option key={university} value={university}>{university}</option>
-                  ))}
-                </select>
-                <select value={form.city} onChange={(e) => setForm((prev) => ({ ...prev, city: e.target.value }))} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500">
-                  <option value="">Select city</option>
-                  {cityOptions.map((city) => (
-                    <option key={city} value={city}>{city}</option>
-                  ))}
-                </select>
+                <input
+                  value={form.university}
+                  onChange={(e) => setForm((prev) => ({ ...prev, university: e.target.value }))}
+                  placeholder="e.g. University of Windsor"
+                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+                <input
+                  value={form.city}
+                  onChange={(e) => setForm((prev) => ({ ...prev, city: e.target.value }))}
+                  placeholder="e.g. Windsor, ON"
+                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
                 <select value={form.gender} onChange={(e) => setForm((prev) => ({ ...prev, gender: e.target.value }))} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500">
                   <option value="">Select gender</option>
                   <option value="Male">Male</option>
@@ -680,6 +722,7 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
                 </select>
                 <input type="date" value={form.moveInDate} onChange={(e) => setForm((prev) => ({ ...prev, moveInDate: e.target.value }))} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500" />
               </div>
+              <p className="text-xs text-slate-400">City format: `City, Province Code` for example `Windsor, ON`.</p>
 
               <div>
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Preferred room type</p>
@@ -725,6 +768,13 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
                     );
                   })}
                 </div>
+                <input
+                  value={form.customLifestyle}
+                  onChange={(e) => setForm((prev) => ({ ...prev, customLifestyle: e.target.value }))}
+                  placeholder="Add personal lifestyle tags, comma separated"
+                  className="mt-3 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+                <p className="mt-1 text-xs text-slate-400">Example: Prayer routine, Early classes, Loves cooking</p>
               </div>
 
               <div>

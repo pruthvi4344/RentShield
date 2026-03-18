@@ -209,7 +209,7 @@ export default function RenterSidebar({
             <div>
               <p className="text-xs font-semibold text-amber-800 mb-0.5">Safety Tip</p>
               <p className="text-xs text-amber-700 leading-relaxed">
-                Never transfer rent outside RentShield. All payments should go through verified channels.
+                Only proceed with verified landlords, keep your chats inside RentShield, and review payment terms before sending any deposit.
               </p>
             </div>
           </div>

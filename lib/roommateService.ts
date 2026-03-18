@@ -27,6 +27,8 @@ export async function fetchPublishedRoommateProfiles(currentUserId: string): Pro
 }
 
 export async function fetchRoommateRequests(currentUserId: string): Promise<RoommateRequestWithProfiles[]> {
+  await supabase.rpc("expire_roommate_requests");
+
   const { data, error } = await supabase
     .from("roommate_requests")
     .select(`
@@ -48,6 +50,8 @@ export async function fetchRoommateRequests(currentUserId: string): Promise<Room
     status: RoommateRequestStatus;
     created_at: string;
     updated_at: string;
+    rejected_at: string | null;
+    expires_at: string | null;
     sender_profile: CompactProfile | CompactProfile[] | null;
     receiver_profile: CompactProfile | CompactProfile[] | null;
   }>).map((row) => ({
@@ -57,26 +61,9 @@ export async function fetchRoommateRequests(currentUserId: string): Promise<Room
   }));
 }
 
-export async function sendRoommateRequest(senderId: string, receiverId: string): Promise<void> {
-  const { data: existing, error: existingError } = await supabase
-    .from("roommate_requests")
-    .select("id, status")
-    .or(`and(sender_id.eq.${senderId},receiver_id.eq.${receiverId}),and(sender_id.eq.${receiverId},receiver_id.eq.${senderId})`)
-    .limit(1)
-    .maybeSingle();
-
-  if (existingError) {
-    throw existingError;
-  }
-
-  if (existing?.id) {
-    throw new Error(existing.status === "accepted" ? "You are already matched with this roommate." : "A roommate request already exists for this profile.");
-  }
-
-  const { error } = await supabase.from("roommate_requests").insert({
-    sender_id: senderId,
-    receiver_id: receiverId,
-    status: "pending",
+export async function sendRoommateRequest(receiverId: string): Promise<void> {
+  const { error } = await supabase.rpc("send_roommate_request", {
+    p_receiver_id: receiverId,
   });
 
   if (error) {
@@ -86,14 +73,12 @@ export async function sendRoommateRequest(senderId: string, receiverId: string):
 
 export async function updateRoommateRequestStatus(
   requestId: string,
-  receiverId: string,
   status: Extract<RoommateRequestStatus, "accepted" | "rejected">,
 ): Promise<void> {
-  const { error } = await supabase
-    .from("roommate_requests")
-    .update({ status })
-    .eq("id", requestId)
-    .eq("receiver_id", receiverId);
+  const { error } = await supabase.rpc("respond_roommate_request", {
+    p_request_id: requestId,
+    p_status: status,
+  });
 
   if (error) {
     throw error;
