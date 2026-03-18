@@ -1,263 +1,257 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
+import type { RenterProfileRecord } from "@/types/profiles";
 
-type VerifStatus = "verified" | "pending" | "not_submitted";
-
-const verificationItems: {
-  id: string;
-  title: string;
-  description: string;
-  status: VerifStatus;
-  icon: React.ReactNode;
-}[] = [
-  {
-    id: "email",
-    title: "Email Verified",
-    description: "Your email address has been confirmed.",
-    status: "verified",
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-      </svg>
-    ),
-  },
-  {
-    id: "identity",
-    title: "Identity Verified",
-    description: "Government-issued ID reviewed and approved.",
-    status: "pending",
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2" />
-      </svg>
-    ),
-  },
-  {
-    id: "student",
-    title: "Student Status",
-    description: "Prove you are an enrolled student or recent graduate.",
-    status: "not_submitted",
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path d="M12 14l9-5-9-5-9 5 9 5z" />
-        <path d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-];
-
-const statusConfig = {
-  verified: {
-    label: "Verified",
-    dot: "bg-emerald-400",
-    badge: "bg-emerald-100 text-emerald-700 border-emerald-200",
-    border: "border-emerald-100",
-    icon: (
-      <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
-        <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-        </svg>
-      </div>
-    ),
-  },
-  pending: {
-    label: "Pending Review",
-    dot: "bg-amber-400",
-    badge: "bg-amber-100 text-amber-700 border-amber-200",
-    border: "border-amber-100",
-    icon: (
-      <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center">
-        <svg className="w-4 h-4 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-      </div>
-    ),
-  },
-  not_submitted: {
-    label: "Not Submitted",
-    dot: "bg-slate-300",
-    badge: "bg-slate-100 text-slate-500 border-slate-200",
-    border: "border-slate-100",
-    icon: (
-      <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center">
-        <svg className="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-      </div>
-    ),
-  },
-};
-
-const completedCount = verificationItems.filter((i) => i.status === "verified").length;
-const totalCount = verificationItems.length;
-const pct = Math.round((completedCount / totalCount) * 100);
+type VerificationStatus = "not_submitted" | "pending" | "verified";
 
 type Props = {
-  isVerified: boolean;
-  onVerify: () => Promise<void>;
-  verifying?: boolean;
+  profile: RenterProfileRecord | null;
+  onSave: (updates: Partial<Omit<RenterProfileRecord, "id" | "created_at" | "updated_at">>) => Promise<void>;
+  saving?: boolean;
 };
 
-export default function VerificationStatus({ isVerified, onVerify, verifying = false }: Props) {
-  const [uploading, setUploading] = useState<string | null>(null);
+const statusConfig = {
+  verified: { label: "Verified", badge: "bg-emerald-100 text-emerald-700 border-emerald-200" },
+  pending: { label: "OTP Sent", badge: "bg-amber-100 text-amber-700 border-amber-200" },
+  not_submitted: { label: "Not Verified", badge: "bg-slate-100 text-slate-500 border-slate-200" },
+} as const;
 
-  function simulateUpload(id: string) {
-    setUploading(id);
-    setTimeout(() => setUploading(null), 2000);
+export default function VerificationStatus({ profile, onSave, saving = false }: Props) {
+  const [emailVerified, setEmailVerified] = useState<boolean | null>(null);
+  const [phoneInput, setPhoneInput] = useState("");
+  const [otpInput, setOtpInput] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
+  const [demoOtp, setDemoOtp] = useState("");
+  const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
+
+  const phoneStatus: VerificationStatus = profile?.phone_verification_status ?? "not_submitted";
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadEmailVerification() {
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (cancelled) {
+        return;
+      }
+
+      if (authError || !user) {
+        setEmailVerified(null);
+        return;
+      }
+
+      setEmailVerified(Boolean(user.email_confirmed_at));
+    }
+
+    void loadEmailVerification();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    setPhoneInput(profile?.phone_number_for_verification ?? profile?.phone ?? "");
+  }, [profile?.phone, profile?.phone_number_for_verification]);
+
+  const completedCount = useMemo(() => {
+    return Number(emailVerified === true) + Number(phoneStatus === "verified");
+  }, [emailVerified, phoneStatus]);
+
+  const progress = Math.round((completedCount / 2) * 100);
+  const accountVerified = Boolean(profile?.is_verified);
+
+  if (!profile) {
+    return <div className="text-sm text-slate-500">Loading verification...</div>;
   }
 
+  async function sendOtp() {
+    setError("");
+    setInfo("");
+
+    if (!phoneInput.trim()) {
+      setError("Enter your mobile number first.");
+      return;
+    }
+
+    const generatedOtp = `${Math.floor(100000 + Math.random() * 900000)}`;
+    setDemoOtp(generatedOtp);
+    setOtpInput("");
+    setOtpSent(true);
+
+    await onSave({
+      phone_number_for_verification: phoneInput.trim(),
+      phone_verification_status: "pending",
+      is_verified: false,
+    });
+
+    setInfo(`Demo OTP sent: ${generatedOtp}`);
+  }
+
+  async function verifyOtp() {
+    setError("");
+    setInfo("");
+
+    if (!otpInput.trim()) {
+      setError("Enter the OTP first.");
+      return;
+    }
+
+    if (otpInput.trim() !== demoOtp) {
+      setError("Invalid OTP. Please try again.");
+      return;
+    }
+
+    await onSave({
+      phone: phoneInput.trim(),
+      phone_number_for_verification: phoneInput.trim(),
+      phone_verification_status: "verified",
+      is_verified: emailVerified !== false,
+    });
+
+    setOtpSent(false);
+    setDemoOtp("");
+    setOtpInput("");
+    setInfo("Mobile number verified successfully.");
+  }
+
+  const emailBadgeClass =
+    emailVerified === true
+      ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+      : emailVerified === false
+        ? "bg-red-100 text-red-700 border-red-200"
+        : "bg-slate-100 text-slate-500 border-slate-200";
+  const emailStatusLabel = emailVerified === true ? "Verified" : emailVerified === false ? "Not Verified" : "Checking";
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 max-w-3xl">
       <div>
-        <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">Verification Status</h2>
-        <p className="text-sm text-slate-500 mt-0.5">Complete verification to unlock full access to RentShield.</p>
+        <h2 className="text-xl font-extrabold tracking-tight text-slate-900">Verification Status</h2>
+        <p className="mt-0.5 text-sm text-slate-500">Your renter account uses email verification and mobile OTP verification only.</p>
       </div>
 
-      {/* Overall progress */}
-      <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-sm">
-        <div className="flex items-center justify-between mb-3">
+      <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+        <div className="mb-3 flex items-center justify-between">
           <div>
-            <p className="text-sm font-bold text-slate-900">Overall Verification Progress</p>
-            <p className="text-xs text-slate-500 mt-0.5">{completedCount} of {totalCount} steps complete</p>
+            <p className="text-sm font-bold text-slate-900">Verification Progress</p>
+            <p className="mt-0.5 text-xs text-slate-500">{completedCount} of 2 steps complete</p>
           </div>
-          <span className={`text-2xl font-extrabold ${pct >= 100 ? "text-emerald-600" : pct >= 50 ? "text-teal-600" : "text-amber-600"}`}>
-            {pct}%
-          </span>
+          <span className={`text-2xl font-extrabold ${progress === 100 ? "text-emerald-600" : "text-amber-500"}`}>{progress}%</span>
         </div>
-        <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+        <div className="h-3 w-full overflow-hidden rounded-full bg-slate-100">
           <div
-            className={`h-3 rounded-full transition-all duration-700 ${pct >= 100 ? "bg-emerald-500" : "bg-gradient-to-r from-teal-500 to-cyan-400"}`}
-            style={{ width: `${pct}%` }}
+            className="h-3 rounded-full bg-gradient-to-r from-teal-500 to-emerald-400 transition-all duration-700"
+            style={{ width: `${progress}%` }}
           />
         </div>
-        {pct < 100 && (
-          <p className="text-xs text-amber-600 mt-2 font-medium">
-            ⚠️ Complete all steps to get the Verified Renter badge and access more listings.
-          </p>
+        <p className={`mt-2 text-xs font-medium ${accountVerified ? "text-emerald-600" : "text-amber-600"}`}>
+          {accountVerified
+            ? "Your renter account is verified. All features are unlocked."
+            : "Verify your mobile number to unlock full renter access."}
+        </p>
+      </div>
+
+      {error ? <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+      {info ? <div className="rounded-xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-700">{info}</div> : null}
+
+      <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-base font-bold text-slate-900">Email Verification</h3>
+            <p className="text-sm text-slate-500">Your email was verified during account registration.</p>
+            <p className="mt-1 text-xs text-slate-400">{profile.email}</p>
+          </div>
+          <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${emailBadgeClass}`}>{emailStatusLabel}</span>
+        </div>
+
+        {emailVerified === true ? (
+          <p className="mt-3 text-xs font-medium text-emerald-600">Verification complete</p>
+        ) : emailVerified === false ? (
+          <p className="mt-3 text-xs font-medium text-amber-600">Please confirm your email from the signup link before continuing.</p>
+        ) : null}
+      </div>
+
+      <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-base font-bold text-slate-900">Mobile Number Verification</h3>
+            <p className="text-sm text-slate-500">Enter your mobile number, request an OTP, and verify it here.</p>
+          </div>
+          <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusConfig[phoneStatus].badge}`}>
+            {statusConfig[phoneStatus].label}
+          </span>
+        </div>
+
+        {phoneStatus === "verified" ? (
+          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+            <p className="text-sm font-semibold text-emerald-700">Mobile number verified</p>
+            <p className="mt-1 text-xs text-emerald-700">{profile.phone_number_for_verification ?? profile.phone ?? "Verified number on file."}</p>
+          </div>
+        ) : (
+          <div className="mt-4 space-y-3">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                type="tel"
+                value={phoneInput}
+                onChange={(event) => setPhoneInput(event.target.value)}
+                placeholder="+1 416 000 0000"
+                className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500"
+              />
+              <button
+                type="button"
+                onClick={() => void sendOtp()}
+                disabled={saving}
+                className="rounded-xl bg-teal-500 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-600 disabled:opacity-60"
+              >
+                Send OTP
+              </button>
+            </div>
+
+            {otpSent && (
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  type="text"
+                  value={otpInput}
+                  onChange={(event) => setOtpInput(event.target.value)}
+                  placeholder="Enter 6-digit OTP"
+                  className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => void verifyOtp()}
+                  disabled={saving}
+                  className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 disabled:opacity-60"
+                >
+                  Verify OTP
+                </button>
+              </div>
+            )}
+
+            <p className="text-xs text-slate-400">For now this uses a demo OTP flow inside RentShield. Real SMS provider integration can be added later.</p>
+          </div>
         )}
       </div>
 
-      {/* Verification items */}
-      <div className="space-y-4">
-        {verificationItems.map((item) => {
-          const cfg = statusConfig[item.status];
-          return (
-            <div key={item.id} className={`bg-white rounded-2xl border ${cfg.border} p-5 shadow-sm`}>
-              <div className="flex items-start gap-4">
-                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 ${
-                  item.status === "verified" ? "bg-emerald-50 text-emerald-600" :
-                  item.status === "pending" ? "bg-amber-50 text-amber-600" :
-                  "bg-slate-50 text-slate-400"
-                }`}>
-                  {item.icon}
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap mb-1">
-                    <h3 className="text-sm font-bold text-slate-900">{item.title}</h3>
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-xs font-semibold ${cfg.badge}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
-                      {cfg.label}
-                    </span>
-                  </div>
-                  <p className="text-sm text-slate-500 leading-relaxed">{item.description}</p>
-
-                  {/* Action */}
-                  {item.status === "verified" && (
-                    <p className="text-xs text-emerald-600 font-medium mt-2 flex items-center gap-1">
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                      </svg>
-                      Verification complete
-                    </p>
-                  )}
-                  {item.status === "pending" && (
-                    <div className="mt-3 flex items-center gap-2">
-                      <div className="flex-1 bg-amber-100 rounded-full h-1.5 overflow-hidden">
-                        <div className="bg-amber-400 h-1.5 rounded-full w-2/3 animate-pulse" />
-                      </div>
-                      <p className="text-xs text-amber-600 font-medium">Under review · usually 24–48h</p>
-                    </div>
-                  )}
-                  {item.status === "not_submitted" && (
-                    <div className="mt-3">
-                      <label className="cursor-pointer">
-                        <input
-                          type="file"
-                          className="hidden"
-                          accept=".jpg,.jpeg,.png,.pdf"
-                          onChange={() => simulateUpload(item.id)}
-                        />
-                        <span className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
-                          uploading === item.id
-                            ? "bg-slate-100 text-slate-400 cursor-not-allowed"
-                            : "bg-teal-500 hover:bg-teal-600 text-white shadow-sm cursor-pointer"
-                        }`}>
-                          {uploading === item.id ? (
-                            <>
-                              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                              </svg>
-                              Uploading...
-                            </>
-                          ) : (
-                            <>
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                              </svg>
-                              Upload Document
-                            </>
-                          )}
-                        </span>
-                      </label>
-                      <p className="text-xs text-slate-400 mt-1.5">Accepted: JPG, PNG, PDF · Max 5MB · Encrypted upload</p>
-                    </div>
-                  )}
-                </div>
-
-                {cfg.icon}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Info box */}
-      <div className="bg-teal-50 border border-teal-100 rounded-2xl p-5">
+      <div className="rounded-2xl border border-teal-100 bg-teal-50 p-5">
         <div className="flex items-start gap-3">
-          <div className="w-8 h-8 rounded-lg bg-teal-100 flex items-center justify-center flex-shrink-0 text-teal-600">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-teal-100 text-teal-600">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
           <div>
-            <p className="text-sm font-bold text-teal-900 mb-1">Why verify your identity?</p>
-            <p className="text-xs text-teal-700 leading-relaxed">
-              Verified renters get priority access to new listings, are more trusted by landlords, and unlock the full RentShield experience including secure document signing. Your data is encrypted and never shared.
+            <p className="mb-1 text-sm font-bold text-teal-900">Why this matters</p>
+            <p className="text-xs leading-relaxed text-teal-700">
+              Verified renter accounts help landlords trust inquiries, improve match quality, and unlock the full RentShield renter experience.
             </p>
           </div>
         </div>
-      </div>
-
-      <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm">
-        <p className="text-sm font-semibold text-slate-900 mb-2">Account Access</p>
-        <p className="text-xs text-slate-600 mb-4">
-          {isVerified
-            ? "Your account is verified. All RentShield features are unlocked."
-            : "Your account is not verified. Verify now to unlock listings, roommate finder, messages, and other services."}
-        </p>
-        <button
-          type="button"
-          disabled={isVerified || verifying}
-          onClick={() => {
-            void onVerify();
-          }}
-          className="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-teal-500 hover:bg-teal-600 disabled:opacity-60"
-        >
-          {isVerified ? "Verified" : verifying ? "Verifying..." : "Complete Verification"}
-        </button>
       </div>
     </div>
   );

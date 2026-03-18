@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import RenterSidebar, { Tab } from "@/components/renter/RenterSidebar";
@@ -14,7 +14,17 @@ import { useRouter } from "next/navigation";
 import { getAuthIdentity, getOrCreateRenterProfile, saveRenterProfile } from "@/lib/profileService";
 import { supabase } from "@/lib/supabaseClient";
 import { fetchUnreadCountsByConversation } from "@/lib/chatService";
+import { fetchPublishedRoommateProfiles } from "@/lib/roommateService";
+import { fetchRecentActivities } from "@/lib/activityService";
+import { fetchRecommendedListings, type RecommendedListingMatch } from "@/lib/recommendationService";
+import type { UserActivityRecord } from "@/types/activity";
 import type { RenterProfileRecord } from "@/types/profiles";
+
+type SavedListingsPayload = {
+  ok: boolean;
+  error?: string;
+  listings?: Array<{ id: string }>;
+};
 
 const tabTitles: Record<Tab, string> = {
   dashboard: "Dashboard",
@@ -38,6 +48,10 @@ export default function RenterDashboardPage() {
   const [saving, setSaving] = useState(false);
   const [accessMessage, setAccessMessage] = useState("");
   const [unreadMessages, setUnreadMessages] = useState(0);
+  const [roommateMatchCount, setRoommateMatchCount] = useState(0);
+  const [savedListingsCount, setSavedListingsCount] = useState(0);
+  const [recentActivities, setRecentActivities] = useState<UserActivityRecord[]>([]);
+  const [recommendedListings, setRecommendedListings] = useState<RecommendedListingMatch[]>([]);
 
   useEffect(() => {
     async function load() {
@@ -60,7 +74,7 @@ export default function RenterDashboardPage() {
       }
     }
 
-    load();
+    void load();
   }, [router]);
 
   useEffect(() => {
@@ -73,24 +87,179 @@ export default function RenterDashboardPage() {
     const refresh = async () => {
       try {
         const unreadMap = await fetchUnreadCountsByConversation();
-        if (cancelled) return;
+        if (cancelled) {
+          return;
+        }
         const total = Object.values(unreadMap).reduce((sum, count) => sum + count, 0);
         setUnreadMessages(total);
       } catch {
-        if (!cancelled) setUnreadMessages(0);
+        if (!cancelled) {
+          setUnreadMessages(0);
+        }
       }
     };
 
     void refresh();
-    const interval = setInterval(() => {
+    const interval = window.setInterval(() => {
       void refresh();
     }, 2500);
 
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      window.clearInterval(interval);
     };
   }, [profile?.id]);
+
+  useEffect(() => {
+    if (!profile?.id) {
+      setRoommateMatchCount(0);
+      return;
+    }
+
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const matches = await fetchPublishedRoommateProfiles(profile.id);
+        if (!cancelled) {
+          setRoommateMatchCount(matches.length);
+        }
+      } catch {
+        if (!cancelled) {
+          setRoommateMatchCount(0);
+        }
+      }
+    };
+
+    void refresh();
+    const interval = window.setInterval(() => {
+      void refresh();
+    }, 10000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [profile?.id]);
+
+  useEffect(() => {
+    if (!profile?.id) {
+      setSavedListingsCount(0);
+      return;
+    }
+
+    let cancelled = false;
+
+    const getToken = async (): Promise<string | null> => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      return session?.access_token ?? null;
+    };
+
+    const refresh = async () => {
+      try {
+        const token = await getToken();
+        if (!token) {
+          if (!cancelled) {
+            setSavedListingsCount(0);
+          }
+          return;
+        }
+
+        const response = await fetch("/api/verification/notify-upload?purpose=saved-listings", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const payload = (await response.json()) as SavedListingsPayload;
+
+        if (!response.ok || !payload.ok) {
+          if (!cancelled) {
+            setSavedListingsCount(0);
+          }
+          return;
+        }
+
+        if (!cancelled) {
+          setSavedListingsCount(payload.listings?.length ?? 0);
+        }
+      } catch {
+        if (!cancelled) {
+          setSavedListingsCount(0);
+        }
+      }
+    };
+
+    void refresh();
+    const interval = window.setInterval(() => {
+      void refresh();
+    }, 10000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [profile?.id]);
+
+  useEffect(() => {
+    if (!profile?.id) {
+      setRecentActivities([]);
+      return;
+    }
+
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const activities = await fetchRecentActivities(profile.id, 5);
+        if (!cancelled) {
+          setRecentActivities(activities);
+        }
+      } catch {
+        if (!cancelled) {
+          setRecentActivities([]);
+        }
+      }
+    };
+
+    void refresh();
+    const interval = window.setInterval(() => {
+      void refresh();
+    }, 10000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [profile?.id]);
+
+  useEffect(() => {
+    if (!profile?.id) {
+      setRecommendedListings([]);
+      return;
+    }
+
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const recommendations = await fetchRecommendedListings(profile, 5);
+        if (!cancelled) {
+          setRecommendedListings(recommendations);
+        }
+      } catch {
+        if (!cancelled) {
+          setRecommendedListings([]);
+        }
+      }
+    };
+
+    void refresh();
+    const interval = window.setInterval(() => {
+      void refresh();
+    }, 30000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [profile]);
 
   async function handleSave(updates: Partial<Omit<RenterProfileRecord, "id" | "created_at" | "updated_at">>) {
     if (!profile) {
@@ -114,14 +283,6 @@ export default function RenterDashboardPage() {
       setAccessMessage("Please complete verification first to use RentShield services.");
     }
   }, [verificationLocked, activeTab]);
-
-  async function handleVerify() {
-    if (!profile) {
-      return;
-    }
-    await handleSave({ is_verified: true });
-    setAccessMessage("");
-  }
 
   function handleTabChange(tab: Tab) {
     if (verificationLocked && !allowedWhenUnverified.includes(tab)) {
@@ -155,25 +316,43 @@ export default function RenterDashboardPage() {
 
   function renderContent() {
     switch (activeTab) {
-      case "dashboard":    return <DashboardOverview onNavigate={handleTabChange} userName={profile?.username ?? "Renter"} />;
-      case "profile":      return <RenterProfile key={profile?.updated_at ?? "renter-profile"} profile={profile} onSave={handleSave} saving={saving} />;
-      case "listings":     return <RenterListings onOpenConversation={openConversation} />;
-      case "saved":        return <SavedListings onOpenConversation={openConversation} />;
-      case "roommate":     return <RoommateFinder onOpenConversation={openConversation} />;
-      case "messages":     return <Messages initialConversationId={selectedConversationId} />;
-      case "verification": return <VerificationStatus isVerified={Boolean(profile?.is_verified)} onVerify={handleVerify} verifying={saving} />;
-      case "settings":     return <Settings key={profile?.updated_at ?? "renter-settings"} profile={profile} onSave={handleSave} saving={saving} />;
-      default:             return null;
+      case "dashboard":
+        return (
+          <DashboardOverview
+            onNavigate={handleTabChange}
+            userName={profile?.username ?? "Renter"}
+            unreadCount={unreadMessages}
+            roommateMatchCount={roommateMatchCount}
+            savedListingsCount={savedListingsCount}
+            recentActivities={recentActivities}
+            recommendedListings={recommendedListings}
+          />
+        );
+      case "profile":
+        return <RenterProfile key={profile?.updated_at ?? "renter-profile"} profile={profile} onSave={handleSave} saving={saving} />;
+      case "listings":
+        return <RenterListings onOpenConversation={openConversation} />;
+      case "saved":
+        return <SavedListings onOpenConversation={openConversation} />;
+      case "roommate":
+        return <RoommateFinder onOpenConversation={openConversation} />;
+      case "messages":
+        return <Messages initialConversationId={selectedConversationId} />;
+      case "verification":
+        return <VerificationStatus profile={profile} onSave={handleSave} saving={saving} />;
+      case "settings":
+        return <Settings key={profile?.updated_at ?? "renter-settings"} profile={profile} onSave={handleSave} saving={saving} />;
+      default:
+        return null;
     }
   }
 
   if (loading) {
-    return <main className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-600">Loading renter dashboard...</main>;
+    return <main className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-600">Loading renter dashboard...</main>;
   }
 
   return (
     <div className="flex min-h-screen bg-slate-50">
-      {/* Sidebar */}
       <RenterSidebar
         activeTab={activeTab}
         onTabChange={handleTabChange}
@@ -184,44 +363,39 @@ export default function RenterDashboardPage() {
         onLockedNavigation={() => setAccessMessage("Please complete verification first to use RentShield services.")}
       />
 
-      {/* Main content */}
-      <div className="flex-1 min-w-0 flex flex-col">
-        {/* Top bar */}
-        <header className="sticky top-0 lg:top-0 z-20 bg-white/90 backdrop-blur-md border-b border-slate-100 px-6 py-4 flex items-center justify-between shadow-sm lg:mt-0 mt-[57px]">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-20 mt-[57px] flex items-center justify-between border-b border-slate-100 bg-white/90 px-6 py-4 shadow-sm backdrop-blur-md lg:mt-0 lg:top-0">
           <div>
-            <h1 className="text-lg font-extrabold text-slate-900 tracking-tight">{tabTitles[activeTab]}</h1>
-            <p className="text-xs text-slate-400 mt-0.5">RentShield Renter Dashboard</p>
+            <h1 className="text-lg font-extrabold tracking-tight text-slate-900">{tabTitles[activeTab]}</h1>
+            <p className="mt-0.5 text-xs text-slate-400">RentShield Renter Dashboard</p>
           </div>
           <div className="flex items-center gap-3">
-            {/* Notification bell */}
-            <button className="relative p-2 rounded-xl hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <button className="relative rounded-xl p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700">
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
               </svg>
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-teal-500 border border-white" />
+              <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full border border-white bg-teal-500" />
             </button>
 
             <button
               onClick={() => void handleLogout()}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700"
+              className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-200"
             >
               Logout
             </button>
 
-            {/* Avatar */}
-            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-400 to-purple-500 flex items-center justify-center text-white text-sm font-bold shadow-sm cursor-pointer hover:ring-2 hover:ring-teal-400 hover:ring-offset-1 transition-all">
+            <div className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-gradient-to-br from-violet-400 to-purple-500 text-sm font-bold text-white shadow-sm transition-all hover:ring-2 hover:ring-teal-400 hover:ring-offset-1">
               {renterInitials}
             </div>
           </div>
         </header>
 
-        {/* Page content */}
-        <main className="flex-1 p-4 sm:p-6 overflow-auto">
-          {accessMessage && (
+        <main className="flex-1 overflow-auto p-4 sm:p-6">
+          {accessMessage ? (
             <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700">
               {accessMessage}
             </div>
-          )}
+          ) : null}
           {renderContent()}
         </main>
       </div>

@@ -12,6 +12,8 @@ export type RenterProfileRecord = {
   email: string;
   username: string;
   is_verified: boolean;
+  phone_verification_status: "not_submitted" | "pending" | "verified";
+  phone_number_for_verification: string | null;
   is_roommate_profile_public: boolean;
   is_published: boolean;
   university: string | null;
@@ -31,7 +33,7 @@ export type RenterProfileRecord = {
   updated_at: string;
 };
 
-export type RoommateRequestStatus = "pending" | "accepted" | "rejected";
+export type RoommateRequestStatus = "pending" | "accepted" | "rejected" | "expired";
 
 export type RoommateRequestRecord = {
   id: string;
@@ -40,6 +42,8 @@ export type RoommateRequestRecord = {
   status: RoommateRequestStatus;
   created_at: string;
   updated_at: string;
+  rejected_at: string | null;
+  expires_at: string | null;
 };
 
 export type RoommateRequestWithProfiles = RoommateRequestRecord & {
