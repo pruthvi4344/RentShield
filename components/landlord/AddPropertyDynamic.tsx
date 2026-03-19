@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createLandlordListing } from "@/lib/landlordListingService";
 import { getAuthIdentity } from "@/lib/profileService";
+import Viewer360 from "@/components/Viewer360";
 
 const STEP_TITLES = [
   "Basic Info",
@@ -19,6 +20,7 @@ const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const MAX_IMAGES = 15;
 const MAX_VIDEOS = 2;
 const MAX_PANORAMAS = 1;
+const MAX_PANORAMA_WIDTH = 4096;
 
 const propertyTypes = ["Apartment", "Condo", "Basement", "Private Room", "Shared Room"];
 const furnishingTypes = [
@@ -130,6 +132,50 @@ function buildPanoramaFile(file: File): File {
   const baseName = file.name.replace(/\.[^.]+$/, "");
   const safeName = `${baseName}__panorama__${extension}`;
   return new File([file], safeName, { type: file.type || "image/jpeg", lastModified: file.lastModified });
+}
+
+async function loadImageElement(file: File): Promise<HTMLImageElement> {
+  return await new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Panorama image could not be read."));
+    };
+    image.src = objectUrl;
+  });
+}
+
+async function optimizePanoramaFile(file: File): Promise<File> {
+  const image = await loadImageElement(file);
+  if (image.naturalWidth <= MAX_PANORAMA_WIDTH) {
+    return file;
+  }
+
+  const targetWidth = MAX_PANORAMA_WIDTH;
+  const targetHeight = Math.max(1, Math.round((image.naturalHeight / image.naturalWidth) * targetWidth));
+  const canvas = document.createElement("canvas");
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return file;
+  }
+  context.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+  const blob = await new Promise<Blob | null>((resolve) => {
+    canvas.toBlob(resolve, "image/jpeg", 0.92);
+  });
+  if (!blob) {
+    return file;
+  }
+
+  const baseName = file.name.replace(/\.[^.]+$/, "");
+  return new File([blob], `${baseName}.jpg`, { type: "image/jpeg", lastModified: file.lastModified });
 }
 
 function validateBasicInfo(form: FormState): StepErrors {
@@ -274,6 +320,7 @@ export default function AddPropertyDynamic() {
   const [showPanoramaModal, setShowPanoramaModal] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [cameraReady, setCameraReady] = useState(false);
+  const [panoramaHint, setPanoramaHint] = useState("");
   const didHydrateDraft = useRef(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const panoramaInputRef = useRef<HTMLInputElement | null>(null);
@@ -283,6 +330,7 @@ export default function AddPropertyDynamic() {
   const imageCount = mediaItems.filter((item) => item.mediaType === "image").length;
   const videoCount = mediaItems.filter((item) => item.mediaType === "video").length;
   const panoramaCount = mediaItems.filter((item) => item.mediaType === "panorama").length;
+  const panoramaItem = mediaItems.find((item) => item.mediaType === "panorama") ?? null;
   const offerBadge = buildSpecialOfferBadge(form);
 
   useEffect(() => {
@@ -383,6 +431,9 @@ export default function AddPropertyDynamic() {
       const target = prev.find((item) => item.id === id);
       if (target) {
         URL.revokeObjectURL(target.previewUrl);
+        if (target.mediaType === "panorama") {
+          setPanoramaHint("");
+        }
       }
       return prev.filter((item) => item.id !== id);
     });
@@ -438,11 +489,11 @@ export default function AddPropertyDynamic() {
     setStepErrors((prev) => ({ ...prev, ...nextErrors }));
   }
 
-  function addPanoramaFile(file: File | null) {
+  async function addPanoramaFile(file: File | null) {
     if (!file) return;
     const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
-    if (!["jpg", "jpeg", "png"].includes(extension)) {
-      setStepErrors((prev) => ({ ...prev, media: "360 panorama must be a jpg or png image" }));
+    if (!["jpg", "jpeg", "png", "webp", "heic", "heif"].includes(extension)) {
+      setStepErrors((prev) => ({ ...prev, media: "360 panorama must be an image file (jpg, png, webp, heic)" }));
       return;
     }
     if (file.size > MAX_FILE_SIZE) {
@@ -450,9 +501,34 @@ export default function AddPropertyDynamic() {
       return;
     }
 
+    let probeImage: HTMLImageElement;
+    try {
+      probeImage = await loadImageElement(file);
+    } catch {
+      setStepErrors((prev) => ({
+        ...prev,
+        media: "This file cannot be read for 360 view. Export the panorama as JPG/PNG/WebP and upload again.",
+      }));
+      return;
+    }
+
+    const ratio = probeImage.naturalWidth / Math.max(1, probeImage.naturalHeight);
+    if (ratio < 1.6 || ratio > 2.4) {
+      setPanoramaHint("Tip: This image is not a wide panorama, so it will not feel like Google 360. Use phone Panorama mode for full room view.");
+    } else {
+      setPanoramaHint("");
+    }
+
+    let panoramaSource = file;
+    try {
+      panoramaSource = await optimizePanoramaFile(file);
+    } catch (error) {
+      console.warn("Panorama pre-processing skipped:", error);
+    }
+
     setStepErrors((prev) => ({ ...prev, media: undefined }));
     setGlobalError("");
-    const panoramaFile = buildPanoramaFile(file);
+    const panoramaFile = buildPanoramaFile(panoramaSource);
     const panoramaItem: MediaItem = {
       id: `${panoramaFile.name}-${panoramaFile.lastModified}-${Math.random().toString(36).slice(2)}`,
       file: panoramaFile,
@@ -549,6 +625,7 @@ export default function AddPropertyDynamic() {
       }
       mediaItems.forEach((item) => URL.revokeObjectURL(item.previewUrl));
       setMediaItems([]);
+      setPanoramaHint("");
       setForm(initialFormState);
       setStep(0);
       setSubmitted(true);
@@ -976,6 +1053,19 @@ export default function AddPropertyDynamic() {
                   </div>
                 </div>
               )}
+
+              {panoramaItem && (
+                <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="text-sm font-semibold text-slate-900">Interactive 360° Preview</p>
+                  <p className="text-xs text-slate-500">Drag left or right with mouse, or swipe on mobile, to look around the whole room.</p>
+                  {panoramaHint && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                      {panoramaHint}
+                    </div>
+                  )}
+                  <Viewer360 src={panoramaItem.previewUrl} className="border-slate-100" />
+                </div>
+              )}
             </div>
           )}
 
@@ -1061,6 +1151,13 @@ export default function AddPropertyDynamic() {
                         <p className="mt-1 text-sm font-medium text-slate-700">{form.availableFrom || "Not set"} · {form.leaseDurationMonths} months</p>
                       </div>
                     </div>
+
+                    {panoramaItem && (
+                      <div className="space-y-2 border-t border-slate-100 pt-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">360 Room Tour</p>
+                        <Viewer360 src={panoramaItem.previewUrl} className="border-slate-100" />
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1163,7 +1260,7 @@ export default function AddPropertyDynamic() {
                     <li>1. Open your phone camera.</li>
                     <li>2. Switch to Panorama mode.</li>
                     <li>3. Slowly capture the room from one corner to the other.</li>
-                    <li>4. Upload the panorama image here.</li>
+                    <li>4. Upload the panorama image here (wide 2:1 format works best).</li>
                   </ol>
                 </div>
 
@@ -1176,10 +1273,14 @@ export default function AddPropertyDynamic() {
                 <input
                   ref={panoramaInputRef}
                   type="file"
-                  accept="image/jpeg,image/png"
+                  accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
                   capture="environment"
                   className="hidden"
-                  onChange={(event) => addPanoramaFile(event.target.files?.[0] ?? null)}
+                  onChange={(event) => {
+                    const selectedFile = event.target.files?.[0] ?? null;
+                    event.target.value = "";
+                    void addPanoramaFile(selectedFile);
+                  }}
                 />
 
                 <div className="flex flex-col gap-3">
@@ -1198,6 +1299,13 @@ export default function AddPropertyDynamic() {
                     Start Optional Live Preview
                   </button>
                 </div>
+
+                {panoramaItem && (
+                  <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Current Panorama</p>
+                    <Viewer360 src={panoramaItem.previewUrl} className="border-slate-100" />
+                  </div>
+                )}
               </div>
             </div>
           </div>

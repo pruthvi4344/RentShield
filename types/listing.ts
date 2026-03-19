@@ -91,5 +91,6 @@ export type LandlordListingWithCover = LandlordListingRecord & {
   photo_count: number;
   video_count: number;
   media_count: number;
+  tour_360_url: string | null;
   special_offer_badge: string | null;
 };

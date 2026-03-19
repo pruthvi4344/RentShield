@@ -8,7 +8,6 @@ import type {
 } from "@/types/listing";
 
 const listingPhotoBucket = "listing-photos";
-const listingMediaBucket = "listing-media";
 const propertyMediaBucket = "property-media";
 
 function sanitizeFileName(fileName: string): string {
@@ -114,13 +113,20 @@ export async function getLandlordListings(landlordId: string): Promise<LandlordL
       const images = media.filter((item) => item.media_type === "image");
       const videos = media.filter((item) => item.media_type === "video");
       const panoramas = media.filter((item) => item.media_type === "panorama");
+      const panoramaPath = listing.tour_360_storage_path ?? panoramas[0]?.storage_path ?? null;
       const firstPhoto = images[0] ?? legacyPhotos[0];
       let coverUrl: string | null = null;
+      let panoramaUrl: string | null = null;
 
       if (firstPhoto?.storage_path) {
         const bucket = "media_type" in firstPhoto ? propertyMediaBucket : listingPhotoBucket;
         const { data: signed } = await supabase.storage.from(bucket).createSignedUrl(firstPhoto.storage_path, 3600);
         coverUrl = signed?.signedUrl ?? null;
+      }
+
+      if (panoramaPath) {
+        const { data: signedPanorama } = await supabase.storage.from(propertyMediaBucket).createSignedUrl(panoramaPath, 3600);
+        panoramaUrl = signedPanorama?.signedUrl ?? null;
       }
 
       const specialOfferBadge = listing.featured_listing
@@ -136,7 +142,8 @@ export async function getLandlordListings(landlordId: string): Promise<LandlordL
         video_count: videos.length,
         media_count: media.length || legacyPhotos.length,
         special_offer_badge: specialOfferBadge ?? null,
-        tour_360_storage_path: listing.tour_360_storage_path ?? panoramas[0]?.storage_path ?? null,
+        tour_360_storage_path: panoramaPath,
+        tour_360_url: panoramaUrl,
       } satisfies LandlordListingWithCover;
     }),
   );
