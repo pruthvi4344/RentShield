@@ -1,3 +1,7 @@
+ "use client";
+
+import { useRouter } from "next/navigation";
+
 const listings = [
   {
     id: 1,
@@ -81,6 +85,12 @@ function VerifiedBadge() {
 }
 
 export default function Listings() {
+  const router = useRouter();
+
+  function handleViewAllListings() {
+    router.push(`/login?next=${encodeURIComponent("/renter?tab=listings")}`);
+  }
+
   return (
     <section className="py-24 bg-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -94,15 +104,16 @@ export default function Listings() {
               Verified Rentals Across Canada
             </h2>
           </div>
-          <a
-            href="/listings"
+          <button
+            type="button"
+            onClick={handleViewAllListings}
             className="flex-shrink-0 inline-flex items-center gap-1.5 text-sm font-semibold text-teal-600 hover:text-teal-700 transition-colors"
           >
             View all listings
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
             </svg>
-          </a>
+          </button>
         </div>
 
         {/* Listing Cards */}

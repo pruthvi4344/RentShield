@@ -1,3 +1,7 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+
 const profiles = [
   {
     initials: "KL",
@@ -35,6 +39,12 @@ const profiles = [
 ];
 
 export default function RoommateSection() {
+  const router = useRouter();
+
+  function handleOpenRoommates() {
+    router.push(`/login?next=${encodeURIComponent("/renter?tab=roommate")}`);
+  }
+
   return (
     <section className="py-24 bg-gradient-to-br from-slate-900 to-slate-800 relative overflow-hidden">
       {/* Background decoration */}
@@ -80,18 +90,20 @@ export default function RoommateSection() {
             </ul>
 
             <div className="flex flex-wrap gap-3">
-              <a
-                href="/roommates"
+              <button
+                type="button"
+                onClick={handleOpenRoommates}
                 className="px-6 py-3 bg-teal-500 hover:bg-teal-400 text-white font-semibold rounded-xl transition-colors text-sm shadow-lg"
               >
                 Find a Roommate
-              </a>
-              <a
-                href="/roommates/post"
+              </button>
+              <button
+                type="button"
+                onClick={handleOpenRoommates}
                 className="px-6 py-3 bg-white/10 hover:bg-white/20 text-white font-semibold rounded-xl border border-white/20 transition-colors text-sm"
               >
                 Post Your Profile
-              </a>
+              </button>
             </div>
           </div>
 
@@ -136,12 +148,14 @@ export default function RoommateSection() {
                   </svg>
                 </button>
               </div>
-            ))}
-
-            <div className="text-center pt-2">
-              <a href="/roommates" className="text-sm text-teal-400 hover:text-teal-300 font-medium transition-colors">
-                View 200+ more verified profiles →
-              </a>
+            ))}            <div className="text-center pt-2">
+              <button
+                type="button"
+                onClick={handleOpenRoommates}
+                className="text-sm text-teal-400 hover:text-teal-300 font-medium transition-colors"
+              >
+                View 200+ more verified profiles 
+              </button>
             </div>
           </div>
         </div>
@@ -149,3 +163,5 @@ export default function RoommateSection() {
     </section>
   );
 }
+
+

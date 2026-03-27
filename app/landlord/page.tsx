@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import LandlordSidebar, { LandlordTab } from "@/components/landlord/LandlordSidebar";
@@ -15,7 +15,11 @@ import { useRouter } from "next/navigation";
 import { getAuthIdentity, getOrCreateLandlordProfile, saveLandlordProfile } from "@/lib/profileService";
 import { supabase } from "@/lib/supabaseClient";
 import { fetchUnreadCountsByConversation } from "@/lib/chatService";
+import { fetchLandlordDashboardData } from "@/lib/landlordDashboardService";
+import { computeLandlordTrustScore } from "@/lib/landlordTrustService";
 import type { LandlordProfileRecord } from "@/types/profiles";
+import type { LandlordTrustScore } from "@/lib/landlordTrustService";
+import type { LandlordDashboardData } from "@/lib/landlordDashboardService";
 
 const tabTitles: Record<LandlordTab, string> = {
   dashboard: "Dashboard",
@@ -39,6 +43,8 @@ export default function LandlordDashboardPage() {
   const [saving, setSaving] = useState(false);
   const [accessMessage, setAccessMessage] = useState("");
   const [unreadMessages, setUnreadMessages] = useState(0);
+  const [trustScore, setTrustScore] = useState<LandlordTrustScore | null>(null);
+  const [dashboardData, setDashboardData] = useState<LandlordDashboardData | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -93,6 +99,60 @@ export default function LandlordDashboardPage() {
     };
   }, [profile?.id]);
 
+  useEffect(() => {
+    if (!profile) {
+      setTrustScore(null);
+      return;
+    }
+
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const nextTrustScore = await computeLandlordTrustScore(profile);
+        if (!cancelled) {
+          setTrustScore(nextTrustScore);
+        }
+      } catch {
+        if (!cancelled) {
+          setTrustScore(null);
+        }
+      }
+    };
+
+    void refresh();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [profile]);
+
+  useEffect(() => {
+    if (!profile?.id) {
+      setDashboardData(null);
+      return;
+    }
+
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const data = await fetchLandlordDashboardData(profile.id, unreadMessages);
+        if (!cancelled) {
+          setDashboardData(data);
+        }
+      } catch {
+        if (!cancelled) {
+          setDashboardData(null);
+        }
+      }
+    };
+
+    void refresh();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.id, unreadMessages]);
+
   async function handleSave(updates: Partial<Omit<LandlordProfileRecord, "id" | "created_at" | "updated_at">>) {
     if (!profile) {
       return;
@@ -139,7 +199,7 @@ export default function LandlordDashboardPage() {
 
   function renderContent() {
     switch (activeTab) {
-      case "dashboard":    return <LandlordDashboard onNavigate={handleTabChange} userName={profile?.username ?? "Landlord"} />;
+      case "dashboard":    return <LandlordDashboard onNavigate={handleTabChange} userName={profile?.username ?? "Landlord"} unreadMessages={unreadMessages} trustScore={trustScore ?? undefined} stats={dashboardData?.stats} activities={dashboardData?.activities} topListings={dashboardData?.topListings} pricingInsight={dashboardData?.pricingInsight} />;
       case "verification": return <VerificationCenter profile={profile} onSave={handleSave} saving={saving} />;
       case "add-property": return <AddPropertyDynamic />;
       case "listings":     return <MyListingsDynamic />;
@@ -163,6 +223,7 @@ export default function LandlordDashboardPage() {
         onTabChange={handleTabChange}
         unreadMessages={unreadMessages}
         pendingRequests={2}
+        trustScore={trustScore ?? undefined}
         userName={profile?.username}
         userEmail={profile?.email}
         verificationLocked={verificationLocked}
@@ -205,3 +266,4 @@ export default function LandlordDashboardPage() {
     </div>
   );
 }
+

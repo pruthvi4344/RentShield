@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 const stats = [
-  { value: "12,000+", label: "Verified Listings" },
-  { value: "98%", label: "Fraud-Free Rate" },
-  { value: "8,500+", label: "Happy Renters" },
+  { value: "50+", label: "Demo Listings" },
+  { value: "20+", label: "Test Users" },
+  { value: "100%", label: "Verified Demo Data" },
 ];
 
 const badges = [
@@ -17,8 +18,45 @@ const badges = [
 ];
 
 export default function HeroSection() {
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [propertyType, setPropertyType] = useState("Any Type");
+
+  function handleFindRentals() {
+    const params = new URLSearchParams();
+    params.set("tab", "listings");
+
+    if (searchQuery.trim()) {
+      params.set("q", searchQuery.trim());
+    }
+
+    if (propertyType !== "Any Type") {
+      params.set("type", propertyType);
+    }
+
+    const nextPath = `/renter?${params.toString()}`;
+    router.push(`/login?next=${encodeURIComponent(nextPath)}`);
+  }
+
+  function handleBrowseListings() {
+    const params = new URLSearchParams();
+    params.set("tab", "listings");
+
+    if (searchQuery.trim()) {
+      params.set("q", searchQuery.trim());
+    }
+
+    if (propertyType !== "Any Type") {
+      params.set("type", propertyType);
+    }
+
+    const nextPath = `/renter?${params.toString()}`;
+    router.push(`/login?next=${encodeURIComponent(nextPath)}`);
+  }
+
+  function handleListProperty() {
+    router.push(`/login?next=${encodeURIComponent("/landlord?tab=add-property")}`);
+  }
 
   return (
     <section className="relative min-h-screen pt-16 overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-teal-900">
@@ -87,7 +125,11 @@ export default function HeroSection() {
                 <option>Private Room</option>
                 <option>Shared Room</option>
               </select>
-              <button className="px-6 py-2.5 bg-teal-500 hover:bg-teal-600 text-white text-sm font-semibold rounded-xl transition-colors shadow-md whitespace-nowrap">
+              <button
+                type="button"
+                onClick={handleFindRentals}
+                className="px-6 py-2.5 bg-teal-500 hover:bg-teal-600 text-white text-sm font-semibold rounded-xl transition-colors shadow-md whitespace-nowrap"
+              >
                 Find Rentals
               </button>
             </div>
@@ -106,18 +148,20 @@ export default function HeroSection() {
 
             {/* CTAs */}
             <div className="flex flex-wrap gap-3 justify-center lg:justify-start">
-              <Link
-                href="/listings"
+              <button
+                type="button"
+                onClick={handleBrowseListings}
                 className="px-6 py-3 bg-teal-500 hover:bg-teal-400 text-white font-semibold rounded-xl shadow-lg hover:shadow-teal-500/25 transition-all duration-200 text-sm"
               >
                 Browse Listings
-              </Link>
-              <Link
-                href="/list-property"
+              </button>
+              <button
+                type="button"
+                onClick={handleListProperty}
                 className="px-6 py-3 bg-white/10 hover:bg-white/20 text-white font-semibold rounded-xl border border-white/20 transition-all duration-200 text-sm backdrop-blur-sm"
               >
                 List Your Property
-              </Link>
+              </button>
             </div>
           </div>
 
@@ -157,13 +201,18 @@ export default function HeroSection() {
         </div>
 
         {/* Stats */}
-        <div className="mt-20 grid grid-cols-3 gap-6 border-t border-white/10 pt-10 max-w-lg mx-auto lg:max-w-none lg:mx-0">
-          {stats.map((stat) => (
-            <div key={stat.label} className="text-center lg:text-left">
-              <p className="text-3xl font-extrabold text-white">{stat.value}</p>
-              <p className="text-sm text-slate-400 mt-0.5">{stat.label}</p>
-            </div>
-          ))}
+        <div className="mt-20 border-t border-white/10 pt-10 max-w-lg mx-auto lg:max-w-none lg:mx-0">
+          <div className="grid grid-cols-3 gap-6">
+            {stats.map((stat) => (
+              <div key={stat.label} className="text-center lg:text-left">
+                <p className="text-3xl font-extrabold text-white">{stat.value}</p>
+                <p className="text-sm text-slate-400 mt-0.5">{stat.label}</p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-4 text-center text-xs font-medium text-slate-400 lg:text-left">
+            Demo data used for presentation purposes
+          </p>
         </div>
       </div>
     </section>

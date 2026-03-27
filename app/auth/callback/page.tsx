@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { type EmailOtpType } from "@supabase/supabase-js";
 import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
-import { getCurrentUserRole, roleToRoute } from "@/lib/roleRouting";
+import { resolvePostLoginRoute } from "@/lib/profileService";
 
 export default function AuthCallbackPage() {
   const router = useRouter();
@@ -40,8 +40,8 @@ export default function AuthCallbackPage() {
           setError(exchangeError.message);
           return;
         }
-        const role = await getCurrentUserRole();
-        router.replace(nextPath ?? (role ? roleToRoute(role) : "/profile"));
+        const route = await resolvePostLoginRoute(nextPath);
+        router.replace(route);
         return;
       }
 
@@ -54,8 +54,8 @@ export default function AuthCallbackPage() {
           setError(verifyError.message);
           return;
         }
-        const role = await getCurrentUserRole();
-        router.replace(nextPath ?? (role ? roleToRoute(role) : "/profile"));
+        const route = await resolvePostLoginRoute(nextPath);
+        router.replace(route);
         return;
       }
 
@@ -68,8 +68,8 @@ export default function AuthCallbackPage() {
           setError(setSessionError.message);
           return;
         }
-        const role = await getCurrentUserRole();
-        router.replace(nextPath ?? (role ? roleToRoute(role) : "/profile"));
+        const route = await resolvePostLoginRoute(nextPath);
+        router.replace(route);
         return;
       }
 
@@ -77,8 +77,8 @@ export default function AuthCallbackPage() {
         data: { session },
       } = await supabase.auth.getSession();
       if (session) {
-        const role = await getCurrentUserRole();
-        router.replace(nextPath ?? (role ? roleToRoute(role) : "/profile"));
+        const route = await resolvePostLoginRoute(nextPath);
+        router.replace(route);
         return;
       }
 

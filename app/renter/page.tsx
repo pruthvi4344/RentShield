@@ -10,7 +10,7 @@ import RoommateFinder from "@/components/renter/RoommateFinder";
 import Messages from "@/components/renter/Messages";
 import VerificationStatus from "@/components/renter/VerificationStatus";
 import Settings from "@/components/renter/Settings";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { getAuthIdentity, getOrCreateRenterProfile, saveRenterProfile } from "@/lib/profileService";
 import { supabase } from "@/lib/supabaseClient";
 import { fetchUnreadCountsByConversation } from "@/lib/chatService";
@@ -41,6 +41,8 @@ const allowedWhenUnverified: Tab[] = ["profile", "settings", "verification"];
 
 export default function RenterDashboardPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const listingId = searchParams.get("listingId");
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [profile, setProfile] = useState<RenterProfileRecord | null>(null);
@@ -76,6 +78,18 @@ export default function RenterDashboardPage() {
 
     void load();
   }, [router]);
+
+  useEffect(() => {
+    const requestedTab = searchParams.get("tab");
+    if (!requestedTab) {
+      return;
+    }
+
+    const allowedTabs: Tab[] = ["dashboard", "profile", "listings", "saved", "roommate", "messages", "verification", "settings"];
+    if (allowedTabs.includes(requestedTab as Tab)) {
+      setActiveTab(requestedTab as Tab);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (!profile?.id) {
@@ -314,6 +328,8 @@ export default function RenterDashboardPage() {
     router.replace("/");
   }
 
+  const isListingsDetailView = activeTab === "listings" && Boolean(listingId);
+
   function renderContent() {
     switch (activeTab) {
       case "dashboard":
@@ -352,7 +368,7 @@ export default function RenterDashboardPage() {
   }
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
+    <div className="flex h-screen overflow-hidden bg-slate-50">
       <RenterSidebar
         activeTab={activeTab}
         onTabChange={handleTabChange}
@@ -364,7 +380,7 @@ export default function RenterDashboardPage() {
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 mt-[57px] flex items-center justify-between border-b border-slate-100 bg-white/90 px-6 py-4 shadow-sm backdrop-blur-md lg:mt-0 lg:top-0">
+        <header className="sticky top-0 z-40 mt-[57px] flex items-center justify-between border-b border-slate-100 bg-white px-6 py-4 shadow-sm lg:mt-0 lg:top-0">
           <div>
             <h1 className="text-lg font-extrabold tracking-tight text-slate-900">{tabTitles[activeTab]}</h1>
             <p className="mt-0.5 text-xs text-slate-400">RentShield Renter Dashboard</p>
@@ -390,7 +406,7 @@ export default function RenterDashboardPage() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-auto p-4 sm:p-6">
+        <main className={`flex-1 overflow-auto overscroll-contain ${isListingsDetailView ? "px-4 pb-4 pt-0 sm:px-6 sm:pb-6" : "p-4 sm:p-6"}`}>
           {accessMessage ? (
             <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700">
               {accessMessage}

@@ -7,6 +7,10 @@ export type LandlordListingRecord = {
   title: string;
   property_type: string;
   street_address: string;
+  formatted_address: string | null;
+  place_id: string | null;
+  latitude: number | null;
+  longitude: number | null;
   city: string;
   postal_code: string | null;
   bedrooms: number;
@@ -60,6 +64,10 @@ export type CreateLandlordListingInput = {
   title: string;
   property_type: string;
   street_address: string;
+  formatted_address?: string | null;
+  place_id?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   city: string;
   postal_code?: string | null;
   bedrooms: number;
@@ -91,5 +99,6 @@ export type LandlordListingWithCover = LandlordListingRecord & {
   photo_count: number;
   video_count: number;
   media_count: number;
+  tour_360_url: string | null;
   special_offer_badge: string | null;
 };

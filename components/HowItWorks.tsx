@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 const steps = [
   {
@@ -30,7 +31,7 @@ const steps = [
     ),
     title: "Get Verified",
     description:
-      "Complete a simple identity check. Landlords verify property ownership. Renters verify identity and student or residency status.",
+      "Landlords complete identity verification through Persona before listing properties. Renters verify their phone number to unlock trusted access and communication.",
     color: "from-violet-400 to-violet-500",
     shadow: "shadow-violet-200",
     ring: "ring-violet-100",
@@ -78,6 +79,7 @@ const LINE_START_DELAY = 300;
 const LINE_DURATION = 1800;
 
 export default function HowItWorks() {
+  const router = useRouter();
   const sectionRef = useRef<HTMLElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const startRef = useRef<number | null>(null);
@@ -155,6 +157,10 @@ export default function HowItWorks() {
       }
     };
   }, [triggered]);
+
+  function handleGetStarted() {
+    router.push("/login");
+  }
 
   return (
     <section id="how-it-works" ref={sectionRef} className="overflow-hidden bg-white py-24">
@@ -275,15 +281,16 @@ export default function HowItWorks() {
             transition: "opacity 0.5s ease 0.4s, transform 0.5s ease 0.4s",
           }}
         >
-          <a
-            href="/signup"
+          <button
+            type="button"
+            onClick={handleGetStarted}
             className="inline-flex items-center gap-2 rounded-xl bg-teal-500 px-8 py-3.5 text-sm font-semibold text-white shadow-md transition-all duration-200 hover:bg-teal-600 hover:shadow-lg"
           >
             Get Started Free
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
             </svg>
-          </a>
+          </button>
         </div>
       </div>
     </section>

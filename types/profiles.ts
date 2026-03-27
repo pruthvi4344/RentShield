@@ -18,6 +18,10 @@ export type RenterProfileRecord = {
   is_published: boolean;
   university: string | null;
   city: string | null;
+  move_to_country: string | null;
+  move_to_province: string | null;
+  move_to_city: string | null;
+  move_to_postal_code: string | null;
   move_in_date: string | null;
   budget_min: number | null;
   budget_max: number | null;

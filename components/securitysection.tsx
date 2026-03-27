@@ -51,8 +51,8 @@ const trustPoints: TrustPoint[] = [
         <path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
       </svg>
     ),
-    title: "Identity Verification",
-    description: "Every user is verified via government-issued ID before gaining full access to listings or roommate profiles.",
+    title: "Persona Identity Check",
+    description: "Landlords complete identity verification through Persona before building trust on RentShield. This adds a stronger identity layer before properties are promoted to renters.",
   },
   {
     icon: (
@@ -60,8 +60,8 @@ const trustPoints: TrustPoint[] = [
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
       </svg>
     ),
-    title: "Ownership Proof",
-    description: "Landlords submit legal ownership documents. Our team manually reviews and approves each listing before it becomes visible.",
+    title: "Phone-Verified Renter Access",
+    description: "Renters verify their phone number to unlock protected access, connect with landlords, and use core RentShield features more safely.",
   },
   {
     icon: (
@@ -69,8 +69,8 @@ const trustPoints: TrustPoint[] = [
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
       </svg>
     ),
-    title: "Scam Detection",
-    description: "Our AI flags suspicious listing patterns: too-good-to-be-true pricing, duplicate photos, and known fraud profiles are blocked automatically.",
+    title: "Structured Listing Review",
+    description: "Property listings use structured details like address, rent, amenities, availability, photos, and video so renters can review information more clearly.",
   },
   {
     icon: (
@@ -78,8 +78,8 @@ const trustPoints: TrustPoint[] = [
         <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
       </svg>
     ),
-    title: "Report and Review",
-    description: "Users can report suspicious activity instantly. Our trust and safety team responds within 24 hours, and accounts are suspended if issues are confirmed.",
+    title: "Protected In-App Communication",
+    description: "Renters and landlords can communicate inside RentShield instead of moving too quickly to untrusted channels, helping conversations stay organized and traceable.",
   },
 ];
 
