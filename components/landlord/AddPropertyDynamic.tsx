@@ -1,9 +1,9 @@
-"use client";
+﻿"use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useJsApiLoader } from "@react-google-maps/api";
 import { createLandlordListing } from "@/lib/landlordListingService";
 import { getAuthIdentity } from "@/lib/profileService";
-import Viewer360 from "@/components/Viewer360";
 
 const STEP_TITLES = [
   "Basic Info",
@@ -19,8 +19,6 @@ const DRAFT_KEY = "rentshield:add-property-draft";
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const MAX_IMAGES = 15;
 const MAX_VIDEOS = 2;
-const MAX_PANORAMAS = 1;
-const MAX_PANORAMA_WIDTH = 4096;
 
 const propertyTypes = ["Apartment", "Condo", "Basement", "Private Room", "Shared Room"];
 const furnishingTypes = [
@@ -28,9 +26,52 @@ const furnishingTypes = [
   { value: "unfurnished", label: "Unfurnished" },
   { value: "partially", label: "Partially" },
 ] as const;
-const cities = ["Toronto, ON", "Vancouver, BC", "Waterloo, ON", "Montreal, QC", "Ottawa, ON", "Calgary, AB"];
 const durationOptions = [1, 2, 3];
 const leaseDurationOptions = [3, 6, 8, 12, 16, 24];
+const canadianPostalCodePattern = /^[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d$/;
+
+type ProvinceOption = {
+  name: string;
+  code: string;
+  cities: string[];
+};
+
+type ParsedGooglePlace = {
+  formattedAddress: string;
+  streetAddress: string;
+  country: string;
+  province: string;
+  city: string;
+  postalCode: string;
+  latitude: number | null;
+  longitude: number | null;
+  placeId: string;
+};
+
+const locationOptions: Record<string, ProvinceOption[]> = {
+  Canada: [
+    { name: "Alberta", code: "AB", cities: ["Calgary", "Edmonton", "Red Deer"] },
+    { name: "British Columbia", code: "BC", cities: ["Burnaby", "Kelowna", "Richmond", "Surrey", "Vancouver", "Victoria"] },
+    { name: "Manitoba", code: "MB", cities: ["Brandon", "Winnipeg"] },
+    { name: "New Brunswick", code: "NB", cities: ["Fredericton", "Moncton", "Saint John"] },
+    { name: "Newfoundland and Labrador", code: "NL", cities: ["Corner Brook", "St. John's"] },
+    { name: "Nova Scotia", code: "NS", cities: ["Halifax", "Sydney"] },
+    { name: "Ontario", code: "ON", cities: ["Hamilton", "Kingston", "Kitchener", "London", "Mississauga", "Ottawa", "Toronto", "Waterloo", "Windsor"] },
+    { name: "Prince Edward Island", code: "PE", cities: ["Charlottetown"] },
+    { name: "Quebec", code: "QC", cities: ["Gatineau", "Laval", "Montreal", "Quebec City", "Sherbrooke"] },
+    { name: "Saskatchewan", code: "SK", cities: ["Regina", "Saskatoon"] },
+  ],
+  "United States": [
+    { name: "California", code: "CA", cities: ["Los Angeles", "San Diego", "San Francisco"] },
+    { name: "Illinois", code: "IL", cities: ["Chicago"] },
+    { name: "Massachusetts", code: "MA", cities: ["Boston"] },
+    { name: "Michigan", code: "MI", cities: ["Detroit"] },
+    { name: "New York", code: "NY", cities: ["Buffalo", "New York City"] },
+    { name: "Texas", code: "TX", cities: ["Austin", "Dallas", "Houston"] },
+  ],
+};
+
+const locationCountries = Object.keys(locationOptions);
 
 const amenitiesList = [
   { id: "wifi", label: "WiFi" },
@@ -48,7 +89,14 @@ const amenitiesList = [
 type FormState = {
   title: string;
   propertyType: string;
+  locationSearch: string;
   streetAddress: string;
+  formattedAddress: string;
+  placeId: string;
+  latitude: string;
+  longitude: string;
+  country: string;
+  province: string;
   city: string;
   postalCode: string;
   bedrooms: string;
@@ -77,7 +125,7 @@ type MediaItem = {
   id: string;
   file: File;
   previewUrl: string;
-  mediaType: "image" | "video" | "panorama";
+  mediaType: "image" | "video";
 };
 
 type StepErrors = Partial<Record<keyof FormState | "media" | "matterport", string>>;
@@ -85,7 +133,14 @@ type StepErrors = Partial<Record<keyof FormState | "media" | "matterport", strin
 const initialFormState: FormState = {
   title: "",
   propertyType: "",
+  locationSearch: "",
   streetAddress: "",
+  formattedAddress: "",
+  placeId: "",
+  latitude: "",
+  longitude: "",
+  country: "Canada",
+  province: "",
   city: "",
   postalCode: "",
   bedrooms: "",
@@ -120,6 +175,150 @@ function buildSpecialOfferBadge(form: FormState): string | null {
   return null;
 }
 
+function formatPostalCode(value: string): string {
+  const cleaned = value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
+  if (cleaned.length <= 3) return cleaned;
+  return `${cleaned.slice(0, 3)} ${cleaned.slice(3)}`;
+}
+
+function buildListingCity(country: string, province: string, city: string): string {
+  const provinceEntry = (locationOptions[country] ?? []).find(
+    (option) => option.name === province || option.code === province,
+  );
+  if (!city.trim()) return "";
+  if (!province.trim()) return city.trim();
+  return `${city.trim()}, ${provinceEntry?.code ?? province.trim()}`;
+}
+
+function getAddressComponent(components: Array<{ long_name?: string; short_name?: string; types?: string[] }> | undefined, type: string) {
+  return components?.find((component) => component.types?.includes(type));
+}
+
+function parseGooglePlace(place: any): ParsedGooglePlace | null {
+  if (!place?.place_id || !place?.formatted_address || !place?.geometry?.location) {
+    return null;
+  }
+
+  const streetNumber = getAddressComponent(place.address_components, "street_number")?.long_name ?? "";
+  const route = getAddressComponent(place.address_components, "route")?.long_name ?? "";
+  const city =
+    getAddressComponent(place.address_components, "locality")?.long_name ??
+    getAddressComponent(place.address_components, "postal_town")?.long_name ??
+    getAddressComponent(place.address_components, "administrative_area_level_2")?.long_name ??
+    "";
+  const province = getAddressComponent(place.address_components, "administrative_area_level_1")?.long_name ?? "";
+  const country = getAddressComponent(place.address_components, "country")?.long_name ?? "Canada";
+  const postalCode = formatPostalCode(getAddressComponent(place.address_components, "postal_code")?.long_name ?? "");
+  const streetAddress = [streetNumber, route].filter(Boolean).join(" ").trim();
+  const latitude = typeof place.geometry.location.lat === "function" ? place.geometry.location.lat() : null;
+  const longitude = typeof place.geometry.location.lng === "function" ? place.geometry.location.lng() : null;
+
+  return {
+    formattedAddress: place.formatted_address,
+    streetAddress,
+    country,
+    province,
+    city,
+    postalCode,
+    latitude,
+    longitude,
+    placeId: place.place_id,
+  };
+}
+
+function GooglePlaceSearch({
+  value,
+  onInputChange,
+  onPlaceSelected,
+  hasError,
+  disabled,
+  city,
+  country,
+}: {
+  value: string;
+  onInputChange: (value: string) => void;
+  onPlaceSelected: (place: ParsedGooglePlace) => void;
+  hasError: boolean;
+  disabled: boolean;
+  city: string;
+  country: string;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const autocompleteRef = useRef<any>(null);
+  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
+  const { isLoaded, loadError } = useJsApiLoader({
+    id: "rentshield-google-places",
+    googleMapsApiKey: apiKey,
+    libraries: ["places"],
+  });
+
+  useEffect(() => {
+    const googleObject = (window as Window & { google?: any }).google;
+    if (!apiKey || !isLoaded || !inputRef.current || !googleObject?.maps?.places || autocompleteRef.current || disabled) {
+      return;
+    }
+
+    const autocomplete = new googleObject.maps.places.Autocomplete(inputRef.current, {
+      fields: ["address_components", "formatted_address", "geometry", "place_id"],
+      types: ["address"],
+      componentRestrictions: { country: "ca" },
+    });
+
+    const listener = autocomplete.addListener("place_changed", () => {
+      const parsed = parseGooglePlace(autocomplete.getPlace());
+      if (parsed) {
+        onPlaceSelected(parsed);
+      }
+    });
+
+    autocompleteRef.current = autocomplete;
+
+    return () => {
+      if (listener?.remove) listener.remove();
+      if (googleObject?.maps?.event && autocompleteRef.current) {
+        googleObject.maps.event.clearInstanceListeners(autocompleteRef.current);
+      }
+      autocompleteRef.current = null;
+    };
+  }, [apiKey, city, country, disabled, isLoaded, onPlaceSelected]);
+
+  if (!apiKey) {
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+        Add <code className="font-mono">NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code> to enable Google Places autocomplete.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={(event) => onInputChange(event.target.value)}
+        placeholder={
+          country !== "Canada"
+            ? "Canada listings only"
+            : disabled
+            ? "Select city first"
+            : loadError
+              ? "Google Places failed to load"
+              : `Enter address in ${city}`
+        }
+        disabled={!isLoaded || disabled}
+        className={`${inputClass(hasError)} disabled:cursor-not-allowed disabled:opacity-60`}
+      />
+      <p className="text-xs text-slate-400">
+        {country !== "Canada"
+          ? "Google address validation is currently enabled for Canada listings only."
+          : disabled
+          ? "Select country, province, and city before entering the street address."
+          : "Select an address from Google suggestions. Only verified Google matches are accepted."}
+      </p>
+    </div>
+  );
+}
+
 function isAllowedFile(file: File): { ok: boolean; type: "image" | "video" | null } {
   const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
   if (["jpg", "jpeg", "png", "webp"].includes(extension)) return { ok: true, type: "image" };
@@ -127,64 +326,24 @@ function isAllowedFile(file: File): { ok: boolean; type: "image" | "video" | nul
   return { ok: false, type: null };
 }
 
-function buildPanoramaFile(file: File): File {
-  const extension = file.name.includes(".") ? file.name.slice(file.name.lastIndexOf(".")) : ".jpg";
-  const baseName = file.name.replace(/\.[^.]+$/, "");
-  const safeName = `${baseName}__panorama__${extension}`;
-  return new File([file], safeName, { type: file.type || "image/jpeg", lastModified: file.lastModified });
-}
-
-async function loadImageElement(file: File): Promise<HTMLImageElement> {
-  return await new Promise((resolve, reject) => {
-    const objectUrl = URL.createObjectURL(file);
-    const image = new Image();
-    image.onload = () => {
-      URL.revokeObjectURL(objectUrl);
-      resolve(image);
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error("Panorama image could not be read."));
-    };
-    image.src = objectUrl;
-  });
-}
-
-async function optimizePanoramaFile(file: File): Promise<File> {
-  const image = await loadImageElement(file);
-  if (image.naturalWidth <= MAX_PANORAMA_WIDTH) {
-    return file;
-  }
-
-  const targetWidth = MAX_PANORAMA_WIDTH;
-  const targetHeight = Math.max(1, Math.round((image.naturalHeight / image.naturalWidth) * targetWidth));
-  const canvas = document.createElement("canvas");
-  canvas.width = targetWidth;
-  canvas.height = targetHeight;
-  const context = canvas.getContext("2d");
-  if (!context) {
-    return file;
-  }
-  context.drawImage(image, 0, 0, targetWidth, targetHeight);
-
-  const blob = await new Promise<Blob | null>((resolve) => {
-    canvas.toBlob(resolve, "image/jpeg", 0.92);
-  });
-  if (!blob) {
-    return file;
-  }
-
-  const baseName = file.name.replace(/\.[^.]+$/, "");
-  return new File([blob], `${baseName}.jpg`, { type: "image/jpeg", lastModified: file.lastModified });
-}
-
 function validateBasicInfo(form: FormState): StepErrors {
   const errors: StepErrors = {};
   if (!form.title.trim()) errors.title = "Property title is required";
+  else if (form.title.trim().length < 5) errors.title = "Property title must be at least 5 characters";
   if (!form.propertyType.trim()) errors.propertyType = "Property type is required";
   if (!form.streetAddress.trim()) errors.streetAddress = "Street address is required";
-  if (!form.city.trim()) errors.city = "City must be selected";
+  else if (form.streetAddress.trim().length < 8) errors.streetAddress = "Street address must be at least 8 characters";
+  if (!form.country.trim()) errors.country = "Country is required";
+  else if (form.country !== "Canada") errors.country = "Google address validation currently supports Canada listings only";
+  if (!form.province.trim()) errors.province = "Province is required";
+  if (!form.city.trim()) errors.city = "City is required";
+  if (form.country.trim() && form.province.trim() && form.city.trim() && (!form.placeId.trim() || !form.latitude.trim() || !form.longitude.trim())) {
+    errors.streetAddress = "Please select address from suggestions";
+  }
   if (!form.postalCode.trim()) errors.postalCode = "Postal code is required";
+  else if (form.country === "Canada" && !canadianPostalCodePattern.test(form.postalCode.trim())) {
+    errors.postalCode = "Enter a valid Canadian postal code in A1A 1A1 format";
+  }
   return errors;
 }
 
@@ -242,16 +401,12 @@ function validateSpecialOffers(form: FormState): StepErrors {
 }
 
 function validateMedia(form: FormState, mediaItems: MediaItem[]): StepErrors {
+  void form;
   const errors: StepErrors = {};
   const images = mediaItems.filter((item) => item.mediaType === "image").length;
   const videos = mediaItems.filter((item) => item.mediaType === "video").length;
-  const panoramas = mediaItems.filter((item) => item.mediaType === "panorama").length;
   if (images > MAX_IMAGES) errors.media = `Maximum ${MAX_IMAGES} images allowed`;
   if (videos > MAX_VIDEOS) errors.media = `Maximum ${MAX_VIDEOS} videos allowed`;
-  if (panoramas > MAX_PANORAMAS) errors.media = `Only ${MAX_PANORAMAS} panorama image is allowed`;
-  if (form.matterportUrl.trim() && form.matterportEmbed.trim()) {
-    errors.matterport = "Use either a Matterport link or iframe embed, not both";
-  }
   return errors;
 }
 
@@ -294,14 +449,14 @@ function inputClass(hasError: boolean): string {
   return [
     "w-full rounded-xl border px-3 py-2.5 text-sm transition-colors focus:outline-none focus:ring-2",
     hasError
-      ? "border-slate-200 bg-white text-slate-900 placeholder-slate-400 focus:border-teal-500 focus:ring-teal-200"
+      ? "border-rose-300 bg-rose-50 text-slate-900 placeholder-slate-400 focus:border-rose-400 focus:ring-rose-100"
       : "border-slate-200 bg-white text-slate-900 placeholder-slate-400 focus:border-teal-500 focus:ring-teal-200",
   ].join(" ");
 }
 
 function InlineError({ message }: { message?: string }) {
-  void message;
-  return null;
+  if (!message) return null;
+  return <p className="mt-1.5 text-xs font-medium text-rose-600">{message}</p>;
 }
 
 export default function AddPropertyDynamic() {
@@ -317,21 +472,14 @@ export default function AddPropertyDynamic() {
   const [submitted, setSubmitted] = useState(false);
   const [validationMessages, setValidationMessages] = useState<string[]>([]);
   const [showValidationModal, setShowValidationModal] = useState(false);
-  const [showPanoramaModal, setShowPanoramaModal] = useState(false);
-  const [cameraError, setCameraError] = useState("");
-  const [cameraReady, setCameraReady] = useState(false);
-  const [panoramaHint, setPanoramaHint] = useState("");
   const didHydrateDraft = useRef(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const panoramaInputRef = useRef<HTMLInputElement | null>(null);
-  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
-  const cameraStreamRef = useRef<MediaStream | null>(null);
 
   const imageCount = mediaItems.filter((item) => item.mediaType === "image").length;
   const videoCount = mediaItems.filter((item) => item.mediaType === "video").length;
-  const panoramaCount = mediaItems.filter((item) => item.mediaType === "panorama").length;
-  const panoramaItem = mediaItems.find((item) => item.mediaType === "panorama") ?? null;
   const offerBadge = buildSpecialOfferBadge(form);
+  const availableProvinces = locationOptions[form.country] ?? [];
+  const availableCities = availableProvinces.find((province) => province.name === form.province)?.cities ?? [];
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -367,55 +515,84 @@ export default function AddPropertyDynamic() {
   useEffect(() => {
     return () => {
       mediaItems.forEach((item) => URL.revokeObjectURL(item.previewUrl));
-      cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
     };
   }, [mediaItems]);
-
-  useEffect(() => {
-    if (!showPanoramaModal) {
-      stopCameraPreview();
-      setCameraError("");
-    }
-  }, [showPanoramaModal]);
-
-  async function startCameraPreview() {
-    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-      setCameraReady(false);
-      return;
-    }
-
-    try {
-      setCameraError("");
-      setCameraReady(false);
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" } },
-        audio: false,
-      });
-      cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
-      cameraStreamRef.current = stream;
-      if (cameraVideoRef.current) {
-        cameraVideoRef.current.srcObject = stream;
-        await cameraVideoRef.current.play().catch(() => undefined);
-      }
-      setCameraReady(true);
-    } catch (error) {
-      setCameraReady(false);
-      setCameraError(error instanceof Error ? error.message : "Unable to start camera preview.");
-    }
-  }
-
-  function stopCameraPreview() {
-    cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
-    cameraStreamRef.current = null;
-    if (cameraVideoRef.current) {
-      cameraVideoRef.current.srcObject = null;
-    }
-    setCameraReady(false);
-  }
 
   function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
+
+  function clearSelectedPlaceDetails() {
+    setForm((prev) => ({
+      ...prev,
+      locationSearch: "",
+      placeId: "",
+      latitude: "",
+      longitude: "",
+      formattedAddress: "",
+    }));
+  }
+
+  function handleCountryChange(value: string) {
+    setForm((prev) => ({
+      ...prev,
+      country: value,
+      province: "",
+      city: "",
+      streetAddress: "",
+      locationSearch: "",
+      placeId: "",
+      latitude: "",
+      longitude: "",
+      postalCode: "",
+      formattedAddress: "",
+    }));
+  }
+
+  function handleProvinceChange(value: string) {
+    setForm((prev) => ({
+      ...prev,
+      province: value,
+      city: "",
+      streetAddress: "",
+      locationSearch: "",
+      placeId: "",
+      latitude: "",
+      longitude: "",
+      postalCode: "",
+      formattedAddress: "",
+    }));
+  }
+
+  function handleCityChange(value: string) {
+    setForm((prev) => ({
+      ...prev,
+      city: value,
+      streetAddress: "",
+      locationSearch: "",
+      placeId: "",
+      latitude: "",
+      longitude: "",
+      postalCode: "",
+      formattedAddress: "",
+    }));
+  }
+
+  const handlePlaceSelected = useCallback((place: ParsedGooglePlace) => {
+    setForm((prev) => ({
+      ...prev,
+      locationSearch: place.formattedAddress,
+      formattedAddress: place.formattedAddress,
+      streetAddress: place.streetAddress,
+      country: place.country || prev.country || "Canada",
+      province: place.province,
+      city: place.city,
+      postalCode: place.postalCode,
+      latitude: place.latitude !== null ? String(place.latitude) : "",
+      longitude: place.longitude !== null ? String(place.longitude) : "",
+      placeId: place.placeId,
+    }));
+  }, []);
 
   function toggleAmenity(id: string) {
     setForm((prev) => ({
@@ -431,9 +608,6 @@ export default function AddPropertyDynamic() {
       const target = prev.find((item) => item.id === id);
       if (target) {
         URL.revokeObjectURL(target.previewUrl);
-        if (target.mediaType === "panorama") {
-          setPanoramaHint("");
-        }
       }
       return prev.filter((item) => item.id !== id);
     });
@@ -489,62 +663,6 @@ export default function AddPropertyDynamic() {
     setStepErrors((prev) => ({ ...prev, ...nextErrors }));
   }
 
-  async function addPanoramaFile(file: File | null) {
-    if (!file) return;
-    const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
-    if (!["jpg", "jpeg", "png", "webp", "heic", "heif"].includes(extension)) {
-      setStepErrors((prev) => ({ ...prev, media: "360 panorama must be an image file (jpg, png, webp, heic)" }));
-      return;
-    }
-    if (file.size > MAX_FILE_SIZE) {
-      setStepErrors((prev) => ({ ...prev, media: "Panorama image must be 20MB or smaller" }));
-      return;
-    }
-
-    let probeImage: HTMLImageElement;
-    try {
-      probeImage = await loadImageElement(file);
-    } catch {
-      setStepErrors((prev) => ({
-        ...prev,
-        media: "This file cannot be read for 360 view. Export the panorama as JPG/PNG/WebP and upload again.",
-      }));
-      return;
-    }
-
-    const ratio = probeImage.naturalWidth / Math.max(1, probeImage.naturalHeight);
-    if (ratio < 1.6 || ratio > 2.4) {
-      setPanoramaHint("Tip: This image is not a wide panorama, so it will not feel like Google 360. Use phone Panorama mode for full room view.");
-    } else {
-      setPanoramaHint("");
-    }
-
-    let panoramaSource = file;
-    try {
-      panoramaSource = await optimizePanoramaFile(file);
-    } catch (error) {
-      console.warn("Panorama pre-processing skipped:", error);
-    }
-
-    setStepErrors((prev) => ({ ...prev, media: undefined }));
-    setGlobalError("");
-    const panoramaFile = buildPanoramaFile(panoramaSource);
-    const panoramaItem: MediaItem = {
-      id: `${panoramaFile.name}-${panoramaFile.lastModified}-${Math.random().toString(36).slice(2)}`,
-      file: panoramaFile,
-      previewUrl: URL.createObjectURL(panoramaFile),
-      mediaType: "panorama",
-    };
-
-    setMediaItems((prev) => {
-      const existingPanoramas = prev.filter((item) => item.mediaType === "panorama");
-      existingPanoramas.forEach((item) => URL.revokeObjectURL(item.previewUrl));
-      return [...prev.filter((item) => item.mediaType !== "panorama"), panoramaItem];
-    });
-    setShowPanoramaModal(false);
-    stopCameraPreview();
-  }
-
   function handleDrop(event: React.DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setDragActive(false);
@@ -592,7 +710,11 @@ export default function AddPropertyDynamic() {
           title: form.title.trim(),
           property_type: form.propertyType,
           street_address: form.streetAddress.trim(),
-          city: form.city,
+          formatted_address: form.formattedAddress.trim() || null,
+          place_id: form.placeId.trim() || null,
+          latitude: form.latitude ? Number(form.latitude) : null,
+          longitude: form.longitude ? Number(form.longitude) : null,
+          city: buildListingCity(form.country, form.province, form.city),
           postal_code: form.postalCode.trim(),
           bedrooms: Number(form.bedrooms),
           bathrooms: Number(form.bathrooms),
@@ -610,8 +732,9 @@ export default function AddPropertyDynamic() {
           limited_time_offer_description: form.limitedTimeOfferDescription.trim() || null,
           limited_time_offer_expires_at: form.limitedTimeOfferExpiresAt || null,
           featured_listing: form.featuredListing,
-          matterport_url: form.matterportUrl.trim() || null,
-          matterport_embed: form.matterportEmbed.trim() || null,
+          matterport_url: null,
+          matterport_embed: null,
+          tour_360_storage_path: null,
           available_from: form.availableFrom || null,
           lease_duration_months: form.leaseDurationMonths ? Number(form.leaseDurationMonths) : null,
           status: "pending",
@@ -625,7 +748,6 @@ export default function AddPropertyDynamic() {
       }
       mediaItems.forEach((item) => URL.revokeObjectURL(item.previewUrl));
       setMediaItems([]);
-      setPanoramaHint("");
       setForm(initialFormState);
       setStep(0);
       setSubmitted(true);
@@ -714,11 +836,11 @@ export default function AddPropertyDynamic() {
         <div className="border-b border-slate-100 px-6 py-5">
           <h3 className="text-lg font-bold text-slate-900">{STEP_TITLES[step]}</h3>
           <p className="mt-1 text-sm text-slate-500">
-            {step === 0 && "Required: title, property type, street address, city, and postal code."}
+            {step === 0 && "Required: title, property type, street address, country, province, city, and postal code."}
             {step === 1 && "Required: beds, baths, square feet, rent, deposit, and furnishing."}
             {step === 2 && "Optional promotional offers that make the property stand out."}
             {step === 3 && "Optional amenities. Select all that apply."}
-            {step === 4 && "Upload images, videos, and a 360 panorama tour."}
+            {step === 4 && "Upload listing photos and videos."}
             {step === 5 && "Availability details shown on the renter listing."}
             {step === 6 && "Review the renter-facing preview before final submission."}
           </p>
@@ -760,39 +882,113 @@ export default function AddPropertyDynamic() {
                 <InlineError message={stepErrors.propertyType} />
               </div>
 
-              <div className="md:col-span-2">
-                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Street address</label>
-                <input
-                  value={form.streetAddress}
-                  onChange={(event) => updateForm("streetAddress", event.target.value)}
-                  placeholder="123 Main St, Unit 4A"
-                  className={inputClass(Boolean(stepErrors.streetAddress))}
-                />
-                <InlineError message={stepErrors.streetAddress} />
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Country</label>
+                <select
+                  value={form.country}
+                  onChange={(event) => handleCountryChange(event.target.value)}
+                  className={inputClass(Boolean(stepErrors.country))}
+                >
+                  <option value="">Select country</option>
+                  {locationCountries.map((country) => (
+                    <option key={country} value={country}>
+                      {country}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-slate-400">Default is Canada for local rental inventory.</p>
+                <InlineError message={stepErrors.country} />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Province</label>
+                <select
+                  value={form.province}
+                  onChange={(event) => handleProvinceChange(event.target.value)}
+                  disabled={!form.country}
+                  className={`${inputClass(Boolean(stepErrors.province))} disabled:cursor-not-allowed disabled:opacity-60`}
+                >
+                  <option value="">Select province</option>
+                  {availableProvinces.map((province) => (
+                    <option key={province.code} value={province.name}>
+                      {province.name}
+                    </option>
+                  ))}
+                </select>
+                <InlineError message={stepErrors.province} />
               </div>
 
               <div>
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">City</label>
-                <select value={form.city} onChange={(event) => updateForm("city", event.target.value)} className={inputClass(Boolean(stepErrors.city))}>
-                  <option value="">Select city</option>
-                  {cities.map((city) => (
-                    <option key={city} value={city}>
-                      {city}
-                    </option>
+                <input
+                  list="listing-city-options"
+                  value={form.city}
+                  onChange={(event) => handleCityChange(event.target.value)}
+                  placeholder="Search city"
+                  disabled={!form.province}
+                  className={`${inputClass(Boolean(stepErrors.city))} disabled:cursor-not-allowed disabled:opacity-60`}
+                />
+                <datalist id="listing-city-options">
+                  {availableCities.map((city) => (
+                    <option key={city} value={city} />
                   ))}
-                </select>
+                </datalist>
+                <p className="mt-1 text-xs text-slate-400">Select province first to narrow city options.</p>
                 <InlineError message={stepErrors.city} />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Street address</label>
+                <GooglePlaceSearch
+                  value={form.locationSearch}
+                  onInputChange={(value) => {
+                    setForm((prev) => ({
+                      ...prev,
+                      locationSearch: value,
+                      streetAddress: value,
+                      placeId: "",
+                      latitude: "",
+                      longitude: "",
+                      formattedAddress: "",
+                    }));
+                  }}
+                  onPlaceSelected={handlePlaceSelected}
+                  hasError={Boolean(stepErrors.streetAddress)}
+                  disabled={!form.city || form.country !== "Canada"}
+                  city={form.city}
+                  country={form.country}
+                />
+                {form.formattedAddress && form.placeId && (
+                  <div className="mt-2 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
+                    Verified address from Google
+                  </div>
+                )}
+                <InlineError message={stepErrors.streetAddress} />
               </div>
 
               <div>
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Postal code</label>
                 <input
                   value={form.postalCode}
-                  onChange={(event) => updateForm("postalCode", event.target.value.toUpperCase())}
-                  placeholder="M5S 1A1"
+                  onChange={(event) => {
+                    clearSelectedPlaceDetails();
+                    updateForm("postalCode", formatPostalCode(event.target.value));
+                  }}
+                  placeholder="A1A 1A1"
                   className={inputClass(Boolean(stepErrors.postalCode))}
                 />
+                <p className="mt-1 text-xs text-slate-400">Canadian format: A1A 1A1</p>
                 <InlineError message={stepErrors.postalCode} />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Latitude</label>
+                <input value={form.latitude} readOnly className={inputClass(false)} />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Longitude</label>
+                <input value={form.longitude} readOnly className={inputClass(false)} />
               </div>
             </div>
           )}
@@ -963,28 +1159,6 @@ export default function AddPropertyDynamic() {
 
           {step === 4 && (
             <div className="space-y-5">
-              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">Create 360° Room Tour</p>
-                  <p className="mt-1 text-sm text-slate-500">
-                    Use the guided mobile flow to capture or upload one panorama image for the room tour.
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowPanoramaModal(true)}
-                    className="rounded-xl bg-teal-500 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-teal-600"
-                  >
-                    Create 360° Room Tour
-                  </button>
-                  {panoramaCount > 0 && (
-                    <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-semibold text-teal-700">
-                      Panorama attached
-                    </span>
-                  )}
-                </div>
-              </div>
 
               <div
                 onDragEnter={(event) => {
@@ -1006,7 +1180,7 @@ export default function AddPropertyDynamic() {
                 <input ref={fileInputRef} type="file" multiple accept=".jpg,.jpeg,.png,.webp,.mp4,.mov" className="hidden" onChange={(event) => event.target.files && addFiles(event.target.files)} />
                 <p className="text-base font-bold text-slate-900">Drag files or click to upload</p>
                 <p className="mt-2 text-sm text-slate-500">Images: jpg, png, webp. Videos: mp4, mov. Max 20MB each.</p>
-                <p className="mt-1 text-xs text-slate-400">Up to {MAX_IMAGES} images and {MAX_VIDEOS} videos. Panorama is uploaded from the 360 tour flow.</p>
+                <p className="mt-1 text-xs text-slate-400">Up to {MAX_IMAGES} images and {MAX_VIDEOS} videos.</p>
               </div>
               <InlineError message={stepErrors.media} />
 
@@ -1015,7 +1189,6 @@ export default function AddPropertyDynamic() {
                   <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500">
                     <span>{imageCount} image(s)</span>
                     <span>{videoCount} video(s)</span>
-                    <span>{panoramaCount} panorama</span>
                   </div>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                     {mediaItems.map((item) => (
@@ -1023,13 +1196,6 @@ export default function AddPropertyDynamic() {
                         <div className="relative aspect-[4/3] bg-slate-100">
                           {item.mediaType === "image" ? (
                             <img src={item.previewUrl} alt={item.file.name} className="h-full w-full object-cover" />
-                          ) : item.mediaType === "panorama" ? (
-                            <>
-                              <img src={item.previewUrl} alt={item.file.name} className="h-full w-full object-cover" />
-                              <div className="absolute left-3 top-3 rounded-full bg-slate-900/75 px-2.5 py-1 text-xs font-semibold text-white">
-                                360 Tour
-                              </div>
-                            </>
                           ) : (
                             <video src={item.previewUrl} className="h-full w-full object-cover" controls />
                           )}
@@ -1054,18 +1220,6 @@ export default function AddPropertyDynamic() {
                 </div>
               )}
 
-              {panoramaItem && (
-                <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
-                  <p className="text-sm font-semibold text-slate-900">Interactive 360° Preview</p>
-                  <p className="text-xs text-slate-500">Drag left or right with mouse, or swipe on mobile, to look around the whole room.</p>
-                  {panoramaHint && (
-                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
-                      {panoramaHint}
-                    </div>
-                  )}
-                  <Viewer360 src={panoramaItem.previewUrl} className="border-slate-100" />
-                </div>
-              )}
             </div>
           )}
 
@@ -1117,11 +1271,15 @@ export default function AddPropertyDynamic() {
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                       <div>
                         <h4 className="text-xl font-bold text-slate-900">{form.title || "Untitled listing"}</h4>
-                        <p className="mt-1 text-sm text-slate-500">{[form.streetAddress, form.city, form.postalCode].filter(Boolean).join(", ") || "Address pending"}</p>
+                        <p className="mt-1 text-sm text-slate-500">
+                          {[form.formattedAddress || form.streetAddress, buildListingCity(form.country, form.province, form.city), form.postalCode]
+                            .filter(Boolean)
+                            .join(", ") || "Address pending"}
+                        </p>
                       </div>
                       <div className="text-left sm:text-right">
                         <p className="text-2xl font-extrabold text-slate-900">{form.monthlyRent ? `$${Number(form.monthlyRent).toLocaleString()}` : "$0"}<span className="text-base font-medium text-slate-400">/mo</span></p>
-                        <p className="mt-1 text-xs font-medium text-slate-500">{form.bedrooms || "-"} bd · {form.bathrooms || "-"} ba · {form.squareFeet || "-"} sq ft</p>
+                        <p className="mt-1 text-xs font-medium text-slate-500">{form.bedrooms || "-"} bd Â· {form.bathrooms || "-"} ba Â· {form.squareFeet || "-"} sq ft</p>
                       </div>
                     </div>
 
@@ -1144,23 +1302,17 @@ export default function AddPropertyDynamic() {
                       </div>
                       <div>
                         <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Media</p>
-                        <p className="mt-1 text-sm font-medium text-slate-700">{imageCount} images, {videoCount} videos, {panoramaCount} panorama</p>
+                        <p className="mt-1 text-sm font-medium text-slate-700">{imageCount} images, {videoCount} videos</p>
                       </div>
                       <div>
                         <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Availability</p>
-                        <p className="mt-1 text-sm font-medium text-slate-700">{form.availableFrom || "Not set"} · {form.leaseDurationMonths} months</p>
-                      </div>
+                        <p className="mt-1 text-sm font-medium text-slate-700">{form.availableFrom || "Not set"} Â· {form.leaseDurationMonths} months</p>
                     </div>
 
-                    {panoramaItem && (
-                      <div className="space-y-2 border-t border-slate-100 pt-4">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">360 Room Tour</p>
-                        <Viewer360 src={panoramaItem.previewUrl} className="border-slate-100" />
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
+            </div>
 
             </div>
           )}
@@ -1226,91 +1378,6 @@ export default function AddPropertyDynamic() {
         </div>
       )}
 
-      {showPanoramaModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
-          <div className="w-full max-w-3xl rounded-3xl bg-white p-6 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h4 className="text-lg font-bold text-slate-900">Create 360° Room Tour</h4>
-                <p className="mt-1 text-sm text-slate-500">
-                  Use the preview below as a guide, then capture the final panorama using your phone camera and upload it here.
-                </p>
-              </div>
-              <button type="button" onClick={() => setShowPanoramaModal(false)} className="text-sm font-semibold text-slate-500 hover:text-slate-700">
-                Close
-              </button>
-            </div>
-
-            <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-[1.5fr_1fr]">
-              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-950">
-                <div className="relative aspect-video">
-                  <video ref={cameraVideoRef} muted playsInline className="h-full w-full object-cover" />
-                  {!cameraReady && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-slate-950/70 px-4 text-center text-sm font-medium text-white">
-                      Camera preview is optional. On iPhone, use the upload button below to open the camera or photo library directly.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                  <p className="font-semibold text-slate-900">How to capture the panorama</p>
-                  <ol className="mt-3 space-y-2">
-                    <li>1. Open your phone camera.</li>
-                    <li>2. Switch to Panorama mode.</li>
-                    <li>3. Slowly capture the room from one corner to the other.</li>
-                    <li>4. Upload the panorama image here (wide 2:1 format works best).</li>
-                  </ol>
-                </div>
-
-                {cameraError && (
-                  <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
-                    {cameraError}
-                  </div>
-                )}
-
-                <input
-                  ref={panoramaInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-                  capture="environment"
-                  className="hidden"
-                  onChange={(event) => {
-                    const selectedFile = event.target.files?.[0] ?? null;
-                    event.target.value = "";
-                    void addPanoramaFile(selectedFile);
-                  }}
-                />
-
-                <div className="flex flex-col gap-3">
-                  <button
-                    type="button"
-                    onClick={() => panoramaInputRef.current?.click()}
-                    className="rounded-xl bg-teal-500 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-teal-600"
-                  >
-                    Open Camera / Upload Panorama
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void startCameraPreview()}
-                    className="rounded-xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-200"
-                  >
-                    Start Optional Live Preview
-                  </button>
-                </div>
-
-                {panoramaItem && (
-                  <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Current Panorama</p>
-                    <Viewer360 src={panoramaItem.previewUrl} className="border-slate-100" />
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

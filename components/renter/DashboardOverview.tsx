@@ -265,7 +265,7 @@ export default function DashboardOverview({
           {recommendedListings.length === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center">
               <p className="text-sm font-medium text-slate-600">No strong matches yet</p>
-              <p className="mt-1 text-xs text-slate-400">Add your city, budget, move-in date, and room type to improve recommendations.</p>
+              <p className="mt-1 text-xs text-slate-400">Add your move-to city, budget, move-in date, and room type to improve recommendations.</p>
             </div>
           ) : (
             <div className="space-y-3">

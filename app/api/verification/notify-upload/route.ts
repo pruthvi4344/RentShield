@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { hasSupabaseAdmin, supabaseAdmin } from "@/lib/supabaseAdmin";
 import { createClient } from "@supabase/supabase-js";
+import { buildLandlordTrustScore } from "@/lib/landlordTrustScore";
+import type { ChatMessage } from "@/types/chat";
+import type { LandlordProfileRecord } from "@/types/profiles";
+import type { LandlordTrustListingInput, LandlordTrustScore } from "@/lib/landlordTrustScore";
 
 type VerificationType = "identity" | "property";
 
@@ -14,6 +18,84 @@ type NotifyPayload = {
 type SavePayload = {
   listingId?: string;
 };
+
+async function fetchLandlordTrustScores(landlordIds: string[]): Promise<Map<string, LandlordTrustScore>> {
+  const uniqueIds = Array.from(new Set(landlordIds.filter(Boolean)));
+  const scoreMap = new Map<string, LandlordTrustScore>();
+
+  if (uniqueIds.length === 0) {
+    return scoreMap;
+  }
+
+  const [
+    { data: profilesData, error: profilesError },
+    { data: listingsData, error: listingsError },
+    { data: conversationsData, error: conversationsError },
+  ] = await Promise.all([
+    supabaseAdmin
+      .from("landlord_profiles")
+      .select("id, email, username, is_verified, identity_verification_status, property_ownership_status, phone_verification_status, phone_number_for_verification, phone, city, bio, business_name, avatar_url, created_at, updated_at")
+      .in("id", uniqueIds),
+    supabaseAdmin
+      .from("landlord_listings")
+      .select("landlord_id, title, property_type, street_address, formatted_address, place_id, latitude, longitude, city, postal_code, square_feet, monthly_rent, security_deposit, available_from, amenities, listing_media(id), listing_photos(id)")
+      .in("landlord_id", uniqueIds),
+    supabaseAdmin
+      .from("conversations")
+      .select("id, landlord_id")
+      .in("landlord_id", uniqueIds),
+  ]);
+
+  if (profilesError) throw new Error(profilesError.message);
+  if (listingsError) throw new Error(listingsError.message);
+  if (conversationsError) throw new Error(conversationsError.message);
+
+  const conversationToLandlord = new Map<string, string>();
+  const conversationIds: string[] = [];
+  for (const row of conversationsData ?? []) {
+    conversationToLandlord.set(row.id as string, row.landlord_id as string);
+    conversationIds.push(row.id as string);
+  }
+
+  let messagesByLandlord = new Map<string, ChatMessage[]>();
+  if (conversationIds.length > 0) {
+    const { data: messagesData, error: messagesError } = await supabaseAdmin
+      .from("messages")
+      .select("id, conversation_id, sender_id, body, created_at, read_at")
+      .in("conversation_id", conversationIds)
+      .order("created_at", { ascending: true });
+
+    if (messagesError) throw new Error(messagesError.message);
+
+    for (const row of (messagesData ?? []) as ChatMessage[]) {
+      const landlordId = conversationToLandlord.get(row.conversation_id);
+      if (!landlordId) continue;
+      const current = messagesByLandlord.get(landlordId) ?? [];
+      current.push(row);
+      messagesByLandlord.set(landlordId, current);
+    }
+  }
+
+  const listingsByLandlord = new Map<string, LandlordTrustListingInput[]>();
+  for (const row of (listingsData ?? []) as Array<LandlordTrustListingInput & { landlord_id: string }>) {
+    const current = listingsByLandlord.get(row.landlord_id) ?? [];
+    current.push(row);
+    listingsByLandlord.set(row.landlord_id, current);
+  }
+
+  for (const profile of (profilesData ?? []) as LandlordProfileRecord[]) {
+    scoreMap.set(
+      profile.id,
+      buildLandlordTrustScore(
+        profile,
+        listingsByLandlord.get(profile.id) ?? [],
+        messagesByLandlord.get(profile.id) ?? [],
+      ),
+    );
+  }
+
+  return scoreMap;
+}
 
 function labelForType(type: VerificationType): string {
   return type === "identity" ? "Identity Verification" : "Property Ownership Verification";
@@ -106,6 +188,10 @@ export async function GET(request: Request) {
           title,
           property_type,
           street_address,
+          formatted_address,
+          place_id,
+          latitude,
+          longitude,
           city,
           bedrooms,
           bathrooms,
@@ -147,6 +233,17 @@ export async function GET(request: Request) {
       return NextResponse.json({ ok: false, error: savedError.message }, { status: 500 });
     }
 
+    const savedLandlordIds = (savedRows ?? [])
+      .map((row) => {
+        const listingJoin = row.landlord_listings as unknown;
+        const listingRaw = Array.isArray(listingJoin) ? listingJoin[0] : listingJoin;
+        return listingRaw && typeof listingRaw === "object" && "landlord_id" in listingRaw
+          ? String((listingRaw as { landlord_id: string }).landlord_id)
+          : null;
+      })
+      .filter((value): value is string => Boolean(value));
+    const trustScores = await fetchLandlordTrustScores(savedLandlordIds);
+
     const savedListings = await Promise.all(
       (savedRows ?? []).map(async (row) => {
         const listingJoin = row.landlord_listings as unknown;
@@ -162,6 +259,10 @@ export async function GET(request: Request) {
           title: string;
           property_type: string;
           street_address: string;
+          formatted_address: string | null;
+          place_id: string | null;
+          latitude: number | null;
+          longitude: number | null;
           city: string;
           bedrooms: number;
           bathrooms: number;
@@ -208,6 +309,10 @@ export async function GET(request: Request) {
           type: typedListing.property_type,
           city: typedListing.city,
           neighbourhood: typedListing.street_address,
+          formattedAddress: typedListing.formatted_address,
+          placeId: typedListing.place_id,
+          latitude: typedListing.latitude,
+          longitude: typedListing.longitude,
           price: Number(typedListing.monthly_rent),
           beds: typedListing.bedrooms,
           baths: typedListing.bathrooms,
@@ -216,6 +321,8 @@ export async function GET(request: Request) {
           landlordName: profile?.username ?? "Landlord",
           landlordEmail: profile?.email ?? null,
           verified: Boolean(profile?.is_verified),
+          landlordTrustScore: trustScores.get(typedListing.landlord_id)?.score ?? null,
+          landlordTrustLabel: trustScores.get(typedListing.landlord_id)?.label ?? null,
           image: imageUrl,
           tour360Url: typedListing.tour_360_storage_path,
           tag: typedListing.featured_listing ? "Featured Property" : typedListing.property_type,
@@ -240,6 +347,10 @@ export async function GET(request: Request) {
       title,
       property_type,
       street_address,
+      formatted_address,
+      place_id,
+      latitude,
+      longitude,
       city,
       postal_code,
       bedrooms,
@@ -282,7 +393,7 @@ export async function GET(request: Request) {
         is_verified
       )
     `)
-    .in("status", ["pending", "active"]);
+    .eq("status", "active");
 
   const { data, error } =
     purpose === "listing-detail" && listingId
@@ -292,6 +403,8 @@ export async function GET(request: Request) {
   if (error) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
+
+  const landlordTrustScores = await fetchLandlordTrustScores((data ?? []).map((row) => row.landlord_id as string));
 
   const mappedListings = await Promise.all(
     (data ?? []).map(async (row) => {
@@ -329,6 +442,10 @@ export async function GET(request: Request) {
         type: row.property_type,
         city: row.city,
         neighbourhood: row.street_address,
+        formattedAddress: row.formatted_address,
+        placeId: row.place_id,
+        latitude: row.latitude,
+        longitude: row.longitude,
         postalCode: row.postal_code,
         price: Number(row.monthly_rent),
         beds: row.bedrooms,
@@ -355,6 +472,8 @@ export async function GET(request: Request) {
         landlordName: profile?.username ?? "Landlord",
         landlordEmail: profile?.email ?? null,
         verified: Boolean(profile?.is_verified),
+        landlordTrustScore: landlordTrustScores.get(row.landlord_id)?.score ?? null,
+        landlordTrustLabel: landlordTrustScores.get(row.landlord_id)?.label ?? null,
         image: validPhotoUrls[0] ?? null,
         images: validPhotoUrls,
         videos: validVideoUrls,

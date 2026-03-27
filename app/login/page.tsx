@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
-import { getCurrentUserRole, roleToRoute } from "@/lib/roleRouting";
+import { resolvePostLoginRoute } from "@/lib/profileService";
 
 const trustItems = [
   { icon: "🛡️", text: "100% verified landlords" },
@@ -14,6 +14,7 @@ const trustItems = [
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -38,8 +39,9 @@ export default function LoginPage() {
       return;
     }
 
-    const role = await getCurrentUserRole();
-    router.push(role ? roleToRoute(role) : "/profile");
+    const nextPath = searchParams.get("next");
+    const route = await resolvePostLoginRoute(nextPath);
+    router.push(route);
   }
 
   return (

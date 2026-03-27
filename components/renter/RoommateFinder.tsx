@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { getAuthIdentity, getOrCreateRenterProfile, saveRenterProfile } from "@/lib/profileService";
@@ -19,6 +19,12 @@ type RoommateFinderProps = {
   onOpenConversation: (conversationId: string) => void;
 };
 
+type ProvinceOption = {
+  name: string;
+  code: string;
+  cities: string[];
+};
+
 const genderOptions = ["Any", "Male", "Female"];
 const countryOptions = [
   "Afghanistan", "Albania", "Algeria", "Argentina", "Australia", "Bangladesh", "Belgium", "Brazil", "Canada",
@@ -29,6 +35,45 @@ const countryOptions = [
   "Turkey", "Uganda", "Ukraine", "United Arab Emirates", "United Kingdom", "United States", "Vietnam", "Zimbabwe",
   "Other",
 ];
+const locationOptions: Record<string, ProvinceOption[]> = {
+  Canada: [
+    { name: "Alberta", code: "AB", cities: ["Calgary", "Edmonton", "Red Deer"] },
+    { name: "British Columbia", code: "BC", cities: ["Burnaby", "Kelowna", "Richmond", "Surrey", "Vancouver", "Victoria"] },
+    { name: "Manitoba", code: "MB", cities: ["Brandon", "Winnipeg"] },
+    { name: "New Brunswick", code: "NB", cities: ["Fredericton", "Moncton", "Saint John"] },
+    { name: "Newfoundland and Labrador", code: "NL", cities: ["Corner Brook", "St. John's"] },
+    { name: "Nova Scotia", code: "NS", cities: ["Halifax", "Sydney"] },
+    { name: "Ontario", code: "ON", cities: ["Hamilton", "Kingston", "Kitchener", "London", "Mississauga", "Ottawa", "Toronto", "Waterloo", "Windsor"] },
+    { name: "Prince Edward Island", code: "PE", cities: ["Charlottetown"] },
+    { name: "Quebec", code: "QC", cities: ["Gatineau", "Laval", "Montreal", "Quebec City", "Sherbrooke"] },
+    { name: "Saskatchewan", code: "SK", cities: ["Regina", "Saskatoon"] },
+  ],
+  "United States": [
+    { name: "California", code: "CA", cities: ["Los Angeles", "San Diego", "San Francisco"] },
+    { name: "Illinois", code: "IL", cities: ["Chicago"] },
+    { name: "Massachusetts", code: "MA", cities: ["Boston"] },
+    { name: "Michigan", code: "MI", cities: ["Detroit"] },
+    { name: "New York", code: "NY", cities: ["Buffalo", "New York City"] },
+    { name: "Texas", code: "TX", cities: ["Austin", "Dallas", "Houston"] },
+  ],
+  India: [
+    { name: "Delhi", code: "DL", cities: ["New Delhi"] },
+    { name: "Gujarat", code: "GJ", cities: ["Ahmedabad", "Surat", "Vadodara"] },
+    { name: "Karnataka", code: "KA", cities: ["Bengaluru", "Mysuru"] },
+    { name: "Maharashtra", code: "MH", cities: ["Mumbai", "Pune"] },
+    { name: "Punjab", code: "PB", cities: ["Amritsar", "Ludhiana"] },
+    { name: "Tamil Nadu", code: "TN", cities: ["Chennai", "Coimbatore"] },
+  ],
+  "United Kingdom": [
+    { name: "England", code: "ENG", cities: ["Birmingham", "London", "Manchester"] },
+    { name: "Scotland", code: "SCT", cities: ["Edinburgh", "Glasgow"] },
+  ],
+  Australia: [
+    { name: "New South Wales", code: "NSW", cities: ["Newcastle", "Sydney"] },
+    { name: "Victoria", code: "VIC", cities: ["Geelong", "Melbourne"] },
+  ],
+};
+const moveToCountries = Object.keys(locationOptions);
 const roomTypeOptions = [
   { value: "private_room", label: "Private Room" },
   { value: "shared_room", label: "Shared Room" },
@@ -103,6 +148,31 @@ function formatCooldownMessage(rejectedAt: string | null): string {
   return `Available to request again on ${nextAllowed.toLocaleString()}`;
 }
 
+function splitLegacyCity(value: string | null | undefined) {
+  const raw = (value ?? "").trim();
+  if (!raw) {
+    return { city: "", province: "" };
+  }
+
+  const parts = raw.split(",").map((part) => part.trim()).filter(Boolean);
+  if (parts.length < 2) {
+    return { city: raw, province: "" };
+  }
+
+  return { city: parts[0], province: parts[1] };
+}
+
+function buildLegacyCity(country: string, province: string, city: string): string | null {
+  if (!city.trim()) return null;
+  if (!province.trim()) return city.trim();
+
+  const provinceEntry = (locationOptions[country] ?? []).find(
+    (option) => option.name === province || option.code === province,
+  );
+
+  return `${city.trim()}, ${provinceEntry?.code ?? province.trim()}`;
+}
+
 function calculateMatchScore(me: RenterProfileRecord | null, other: RenterProfileRecord): number {
   if (!me) return 82;
 
@@ -159,8 +229,10 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
   const [form, setForm] = useState({
     country: "",
     university: "",
-    city: "",
     gender: "",
+    moveToCountry: "Canada",
+    moveToProvince: "",
+    moveToCity: "",
     roommatePreferredGender: "Any",
     budgetMin: "",
     budgetMax: "",
@@ -183,11 +255,14 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
 
       const mine = await getOrCreateRenterProfile(auth);
       setMyProfile(mine);
+      const fallbackLocation = splitLegacyCity(mine.city);
       setForm({
         country: mine.country ?? "",
         university: mine.university ?? "",
-        city: mine.city ?? "",
         gender: mine.gender ?? "",
+        moveToCountry: mine.move_to_country ?? "Canada",
+        moveToProvince: mine.move_to_province ?? fallbackLocation.province,
+        moveToCity: mine.move_to_city ?? fallbackLocation.city,
         roommatePreferredGender: mine.roommate_preferred_gender ?? "Any",
         budgetMin: mine.budget_min?.toString() ?? "",
         budgetMax: mine.budget_max?.toString() ?? "",
@@ -216,6 +291,30 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
     void loadData();
   }, []);
 
+  const availableMoveToProvinces = locationOptions[form.moveToCountry] ?? [];
+  const availableMoveToCities = availableMoveToProvinces.find((province) => province.name === form.moveToProvince)?.cities ?? [];
+
+  function setFormField<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function handleMoveToCountryChange(value: string) {
+    setForm((prev) => ({
+      ...prev,
+      moveToCountry: value,
+      moveToProvince: "",
+      moveToCity: "",
+    }));
+  }
+
+  function handleMoveToProvinceChange(value: string) {
+    setForm((prev) => ({
+      ...prev,
+      moveToProvince: value,
+      moveToCity: "",
+    }));
+  }
+
   async function handleSaveProfile(publish: boolean) {
     if (!myProfile) return;
 
@@ -229,8 +328,8 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
       setFormError("Budget min cannot be greater than budget max.");
       return;
     }
-    if (publish && (!form.city || !form.university || !form.gender || !form.roomPreference)) {
-      setFormError("Select city, university, gender, and room type before publishing.");
+    if (publish && (!form.moveToCountry || !form.moveToProvince || !form.moveToCity || !form.university || !form.gender || !form.roomPreference)) {
+      setFormError("Complete your move preferences, university, gender, and room type before publishing.");
       return;
     }
 
@@ -245,7 +344,10 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
       const updated = await saveRenterProfile(myProfile.id, {
         country: form.country || null,
         university: form.university || null,
-        city: form.city || null,
+        city: buildLegacyCity(form.moveToCountry, form.moveToProvince, form.moveToCity),
+        move_to_country: form.moveToCountry || null,
+        move_to_province: form.moveToProvince || null,
+        move_to_city: form.moveToCity || null,
         gender: form.gender || null,
         roommate_preferred_gender: form.roommatePreferredGender || null,
         budget_min: budgetMin,
@@ -409,7 +511,7 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
           <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <div>
-                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">City</label>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Move-To City</label>
                 <select
                   value={cityFilter}
                   onChange={(event) => setCityFilter(event.target.value)}
@@ -506,7 +608,7 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
                             )}
                           </div>
                           <p className="mt-0.5 text-xs text-slate-500">
-                            from {profile.country ?? "Unknown"} · {profile.gender ?? "Not set"}
+                            from {profile.country ?? "Unknown"} - {profile.gender ?? "Not set"}
                           </p>
                         </div>
                         <ScoreBadge score={score} />
@@ -514,7 +616,7 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
 
                       <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-600">
                         <span>University: {profile.university ?? "Not set"}</span>
-                        <span>City: {profile.city ?? "Not set"}</span>
+                        <span>Move to: {profile.city ?? "Not set"}</span>
                         <span>Budget: ${profile.budget_min ?? 0}-${profile.budget_max ?? 0}/mo</span>
                         <span>Move in: {formatMoveInDate(profile.move_in_date)}</span>
                         <span>Room: {roomTypeLabel(profile.room_preference)}</span>
@@ -617,7 +719,7 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
                           </span>
                         </div>
                         <p className="mt-1 text-sm text-slate-500">
-                          {sender?.city ?? "Unknown city"} · {sender?.university ?? "University not set"}
+                          Move to {sender?.city ?? "Unknown city"} - {sender?.university ?? "University not set"}
                         </p>
                         <p className="mt-1 text-xs text-slate-400">
                           Sent {new Date(request.created_at).toLocaleDateString()}
@@ -678,7 +780,7 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
             <div className="mb-4 flex items-center justify-between">
               <div>
                 <h3 className="text-lg font-bold text-slate-900">Roommate Profile</h3>
-                <p className="mt-1 text-sm text-slate-500">Save as draft or publish when you are ready to be visible.</p>
+                <p className="mt-1 text-sm text-slate-500">Tell other renters where you are from and where you want to move.</p>
               </div>
               <button
                 type="button"
@@ -689,68 +791,145 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
               </button>
             </div>
 
-            <div className="space-y-5">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <select value={form.country} onChange={(e) => setForm((prev) => ({ ...prev, country: e.target.value }))} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500">
-                  <option value="">Select country</option>
-                  {countryOptions.map((country) => (
-                    <option key={country} value={country}>{country}</option>
-                  ))}
-                </select>
-                <input
-                  value={form.university}
-                  onChange={(e) => setForm((prev) => ({ ...prev, university: e.target.value }))}
-                  placeholder="e.g. University of Windsor"
-                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                />
-                <input
-                  value={form.city}
-                  onChange={(e) => setForm((prev) => ({ ...prev, city: e.target.value }))}
-                  placeholder="e.g. Windsor, ON"
-                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                />
-                <select value={form.gender} onChange={(e) => setForm((prev) => ({ ...prev, gender: e.target.value }))} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500">
-                  <option value="">Select gender</option>
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                  <option value="Other">Other</option>
-                </select>
-                <select value={form.roommatePreferredGender} onChange={(e) => setForm((prev) => ({ ...prev, roommatePreferredGender: e.target.value }))} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500">
+            <div className="space-y-6">
+              <div className="rounded-xl border border-teal-100 bg-teal-50 px-4 py-3 text-xs font-medium text-teal-700">
+                Pre-filled from your profile. Update anything here before you publish.
+              </div>
+
+              <section className="space-y-3">
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wide text-slate-600">Basic Information</h4>
+                  <p className="mt-1 text-xs text-slate-400">Tell others where you are from and a bit about your current background.</p>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <input
+                    list="roommate-origin-country-options"
+                    value={form.country}
+                    onChange={(e) => setFormField("country", e.target.value)}
+                    placeholder="Country of origin"
+                    className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  />
+                  <datalist id="roommate-origin-country-options">
+                    {countryOptions.map((country) => (
+                      <option key={country} value={country} />
+                    ))}
+                  </datalist>
+                  <input
+                    value={form.university}
+                    onChange={(e) => setFormField("university", e.target.value)}
+                    placeholder="University / workplace"
+                    className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  />
+                  <select value={form.gender} onChange={(e) => setFormField("gender", e.target.value)} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500">
+                    <option value="">Select gender</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+              </section>
+
+              <section className="space-y-3">
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wide text-slate-600">Move Preferences</h4>
+                  <p className="mt-1 text-xs text-slate-400">Choose where you want to move and when you plan to move in.</p>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <input
+                    list="roommate-move-country-options"
+                    value={form.moveToCountry}
+                    onChange={(e) => handleMoveToCountryChange(e.target.value)}
+                    placeholder="Select Country"
+                    className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  />
+                  <datalist id="roommate-move-country-options">
+                    {moveToCountries.map((country) => (
+                      <option key={country} value={country} />
+                    ))}
+                  </datalist>
+                  <select
+                    value={form.moveToProvince}
+                    onChange={(e) => handleMoveToProvinceChange(e.target.value)}
+                    disabled={!form.moveToCountry}
+                    className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <option value="">Select Province</option>
+                    {availableMoveToProvinces.map((province) => (
+                      <option key={province.code} value={province.name}>{province.name}</option>
+                    ))}
+                  </select>
+                  <input
+                    list="roommate-move-city-options"
+                    value={form.moveToCity}
+                    onChange={(e) => setFormField("moveToCity", e.target.value)}
+                    disabled={!form.moveToProvince}
+                    placeholder="Search City"
+                    className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                  <datalist id="roommate-move-city-options">
+                    {availableMoveToCities.map((city) => (
+                      <option key={city} value={city} />
+                    ))}
+                  </datalist>
+                  <input
+                    type="date"
+                    value={form.moveInDate}
+                    onChange={(e) => setFormField("moveInDate", e.target.value)}
+                    className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  />
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <input type="number" min="0" value={form.budgetMin} onChange={(e) => setFormField("budgetMin", e.target.value)} placeholder="Budget min" className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                  <input type="number" min="0" value={form.budgetMax} onChange={(e) => setFormField("budgetMax", e.target.value)} placeholder="Budget max" className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs text-slate-400">
+                    <span>Budget min: ${form.budgetMin || 0}</span>
+                    <span>Budget max: ${form.budgetMax || 1500}</span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <input type="range" min="0" max="3000" step="50" value={form.budgetMin || 0} onChange={(e) => setFormField("budgetMin", e.target.value)} className="w-full accent-teal-500" />
+                    <input type="range" min="0" max="3000" step="50" value={form.budgetMax || 1500} onChange={(e) => setFormField("budgetMax", e.target.value)} className="w-full accent-teal-500" />
+                  </div>
+                </div>
+              </section>
+
+              <section className="space-y-3">
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wide text-slate-600">Room Preferences</h4>
+                  <p className="mt-1 text-xs text-slate-400">Set the room type you want and who you would prefer to live with.</p>
+                </div>
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Room Type</p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {roomTypeOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setFormField("roomPreference", option.value)}
+                        className={`rounded-xl border px-3 py-3 text-sm font-semibold transition-colors ${
+                          form.roomPreference === option.value
+                            ? "border-teal-500 bg-teal-50 text-teal-700"
+                            : "border-slate-200 bg-white text-slate-700 hover:border-teal-200"
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <select value={form.roommatePreferredGender} onChange={(e) => setFormField("roommatePreferredGender", e.target.value)} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500">
                   <option value="Any">Preferred roommate gender: Any</option>
                   <option value="Male">Preferred roommate gender: Male</option>
                   <option value="Female">Preferred roommate gender: Female</option>
                 </select>
-                <input type="date" value={form.moveInDate} onChange={(e) => setForm((prev) => ({ ...prev, moveInDate: e.target.value }))} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500" />
-              </div>
-              <p className="text-xs text-slate-400">City format: `City, Province Code` for example `Windsor, ON`.</p>
+              </section>
 
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Preferred room type</p>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {roomTypeOptions.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setForm((prev) => ({ ...prev, roomPreference: option.value }))}
-                      className={`rounded-xl border px-3 py-3 text-sm font-semibold transition-colors ${
-                        form.roomPreference === option.value
-                          ? "border-teal-500 bg-teal-50 text-teal-700"
-                          : "border-slate-200 bg-white text-slate-700 hover:border-teal-200"
-                      }`}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
+              <section className="space-y-3">
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wide text-slate-600">Lifestyle Preferences</h4>
+                  <p className="mt-1 text-xs text-slate-400">Keep the chips that match your day-to-day living style.</p>
                 </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <input type="number" min="0" value={form.budgetMin} onChange={(e) => setForm((prev) => ({ ...prev, budgetMin: e.target.value }))} placeholder="Budget min" className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500" />
-                <input type="number" min="0" value={form.budgetMax} onChange={(e) => setForm((prev) => ({ ...prev, budgetMax: e.target.value }))} placeholder="Budget max" className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500" />
-              </div>
-
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Lifestyle</p>
                 <div className="flex flex-wrap gap-2">
                   {lifestyleOptions.map((tag) => {
                     const selected = form.lifestyle.includes(tag);
@@ -770,17 +949,20 @@ export default function RoommateFinder({ onOpenConversation }: RoommateFinderPro
                 </div>
                 <input
                   value={form.customLifestyle}
-                  onChange={(e) => setForm((prev) => ({ ...prev, customLifestyle: e.target.value }))}
+                  onChange={(e) => setFormField("customLifestyle", e.target.value)}
                   placeholder="Add personal lifestyle tags, comma separated"
-                  className="mt-3 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500"
                 />
-                <p className="mt-1 text-xs text-slate-400">Example: Prayer routine, Early classes, Loves cooking</p>
-              </div>
+                <p className="text-xs text-slate-400">Example: Prayer routine, Early classes, Loves cooking</p>
+              </section>
 
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Bio</p>
-                <textarea value={form.bio} onChange={(e) => setForm((prev) => ({ ...prev, bio: e.target.value }))} rows={4} placeholder="Tell potential roommates about your routine, habits, and the kind of home you want." className="w-full resize-none rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500" />
-              </div>
+              <section className="space-y-3">
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wide text-slate-600">About You</h4>
+                  <p className="mt-1 text-xs text-slate-400">Give other renters a quick sense of your routine and what kind of home you want.</p>
+                </div>
+                <textarea value={form.bio} onChange={(e) => setFormField("bio", e.target.value)} rows={4} placeholder="Tell potential roommates about your routine, habits, and the kind of home you want." className="w-full resize-none rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+              </section>
             </div>
 
             {formError && (

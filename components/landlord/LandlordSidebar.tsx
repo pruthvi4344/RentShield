@@ -1,6 +1,7 @@
-"use client";
+﻿"use client";
 
 import { useState } from "react";
+import type { LandlordTrustScore } from "@/lib/landlordTrustService";
 
 export type LandlordTab =
   | "dashboard"
@@ -18,6 +19,7 @@ interface Props {
   onTabChange: (tab: LandlordTab) => void;
   unreadMessages?: number;
   pendingRequests?: number;
+  trustScore?: LandlordTrustScore;
   userName?: string;
   userEmail?: string;
   verificationLocked?: boolean;
@@ -92,6 +94,7 @@ export default function LandlordSidebar({
   onTabChange,
   unreadMessages = 5,
   pendingRequests = 2,
+  trustScore,
   userName,
   userEmail,
   verificationLocked = false,
@@ -104,7 +107,6 @@ export default function LandlordSidebar({
 
   const sidebarContent = (
     <div className="flex flex-col h-full">
-      {/* Logo */}
       <div className="px-6 py-5 border-b border-slate-100">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-teal-500 to-cyan-600 flex items-center justify-center shadow-md">
@@ -121,7 +123,6 @@ export default function LandlordSidebar({
         </div>
       </div>
 
-      {/* Landlord mini-card */}
       <div className="px-6 py-4 border-b border-slate-100">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
@@ -132,16 +133,15 @@ export default function LandlordSidebar({
             {userEmail && <p className="text-[11px] text-slate-400 truncate">{userEmail}</p>}
             <div className="flex items-center gap-1.5">
               <div className="flex items-center gap-1">
-                <span className="text-amber-400 text-xs">★</span>
+                <span className="text-amber-400 text-xs">{"\u2605"}</span>
                 <span className="text-xs font-semibold text-slate-600">Trust Score</span>
               </div>
-              <span className="text-xs font-bold text-emerald-600">92%</span>
+              <span className="text-xs font-bold text-emerald-600">{trustScore?.score ?? 0}%</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Nav items */}
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
         {navItems.map((item) => {
           const isActive = activeTab === item.id;
@@ -173,19 +173,18 @@ export default function LandlordSidebar({
                   {badge}
                 </span>
               )}
-              {verificationLocked && !allowedWhenUnverified.includes(item.id) && <span className="text-xs text-slate-400">🔒</span>}
+              {verificationLocked && !allowedWhenUnverified.includes(item.id) && <span className="text-xs text-slate-400">{"\u{1F512}"}</span>}
               {isActive && <div className="w-1.5 h-1.5 rounded-full bg-teal-500 flex-shrink-0" />}
             </button>
           );
         })}
       </nav>
 
-      {/* Smart tip */}
       <div className="px-4 pb-5 pt-3 border-t border-slate-100">
         <div className="bg-teal-50 border border-teal-100 rounded-xl p-3">
-          <p className="text-xs font-semibold text-teal-800 mb-1">💡 Smart Tip</p>
+          <p className="text-xs font-semibold text-teal-800 mb-1">{"\u{1F4A1}"} Smart Tip</p>
           <p className="text-xs text-teal-700 leading-relaxed">
-            Listings with 5+ photos get <span className="font-bold">3× more</span> renter inquiries.
+            Listings with 5+ photos get <span className="font-bold">3{"\u00D7"} more</span> renter inquiries.
           </p>
         </div>
       </div>
@@ -198,7 +197,6 @@ export default function LandlordSidebar({
         {sidebarContent}
       </aside>
 
-      {/* Mobile top bar */}
       <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-teal-500 to-cyan-600 flex items-center justify-center">

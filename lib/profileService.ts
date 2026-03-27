@@ -153,3 +153,19 @@ export async function saveLandlordProfile(
 
   return data as LandlordProfileRecord;
 }
+
+export async function resolvePostLoginRoute(nextPath?: string | null): Promise<string> {
+  const auth = await getAuthIdentity();
+  if (!auth) {
+    return "/login";
+  }
+
+  if (auth.role === "renter") {
+    const renterProfile = await getOrCreateRenterProfile(auth);
+    if (!renterProfile.is_verified) {
+      return "/renter?tab=verification";
+    }
+  }
+
+  return nextPath || (auth.role === "landlord" ? "/landlord" : "/renter");
+}

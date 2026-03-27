@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { deleteLandlordListing, getLandlordListings, updateLandlordListing } from "@/lib/landlordListingService";
 import { getAuthIdentity } from "@/lib/profileService";
-import Viewer360 from "@/components/Viewer360";
 import type { LandlordListingWithCover } from "@/types/listing";
 
 const statusCfg = {
@@ -20,6 +19,7 @@ export default function MyListingsDynamic() {
   const [error, setError] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [statusSavingId, setStatusSavingId] = useState<string | null>(null);
   const [viewListing, setViewListing] = useState<LandlordListingWithCover | null>(null);
   const [editListing, setEditListing] = useState<LandlordListingWithCover | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
@@ -69,6 +69,29 @@ export default function MyListingsDynamic() {
       setError(deleteError instanceof Error ? deleteError.message : "Failed to delete listing.");
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  async function setListingStatus(listing: LandlordListingWithCover, nextStatus: "active" | "inactive" | "rented") {
+    if (!landlordId) return;
+    setStatusSavingId(listing.id);
+    setError("");
+    try {
+      const updated = await updateLandlordListing(landlordId, listing.id, {
+        status: nextStatus,
+      });
+
+      setListings((prev) =>
+        prev.map((item) =>
+          item.id === updated.id
+            ? { ...item, ...updated, monthly_rent: Number(updated.monthly_rent) }
+            : item,
+        ),
+      );
+    } catch (statusError) {
+      setError(statusError instanceof Error ? statusError.message : "Failed to update listing status.");
+    } finally {
+      setStatusSavingId(null);
     }
   }
 
@@ -166,11 +189,44 @@ export default function MyListingsDynamic() {
                     <div className="flex items-center gap-5 mt-3 text-xs text-slate-500">
                       <span>{listing.views_count} views</span>
                       <span>{listing.inquiries_count} inquiries</span>
-                      {listing.tour_360_url && <span className="rounded-full bg-teal-50 px-2 py-0.5 font-semibold text-teal-700">360 tour</span>}
                       <span>Listed {new Date(listing.created_at).toLocaleDateString()}</span>
                     </div>
 
                     <div className="flex items-center gap-2 mt-4 pt-3 border-t border-slate-50">
+                      {listing.status === "active" ? (
+                        <>
+                          <button
+                            onClick={() => void setListingStatus(listing, "inactive")}
+                            disabled={statusSavingId === listing.id}
+                            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg border border-slate-200 disabled:opacity-60"
+                          >
+                            {statusSavingId === listing.id ? "Saving..." : "Deactivate"}
+                          </button>
+                          <button
+                            onClick={() => void setListingStatus(listing, "rented")}
+                            disabled={statusSavingId === listing.id}
+                            className="px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-700 text-xs font-semibold rounded-lg border border-teal-200 disabled:opacity-60"
+                          >
+                            {statusSavingId === listing.id ? "Saving..." : "Mark Rented"}
+                          </button>
+                        </>
+                      ) : listing.status === "inactive" || listing.status === "pending" ? (
+                        <button
+                          onClick={() => void setListingStatus(listing, "active")}
+                          disabled={statusSavingId === listing.id}
+                          className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-semibold rounded-lg border border-emerald-200 disabled:opacity-60"
+                        >
+                          {statusSavingId === listing.id ? "Saving..." : "Activate"}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => void setListingStatus(listing, "active")}
+                          disabled={statusSavingId === listing.id}
+                          className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-semibold rounded-lg border border-emerald-200 disabled:opacity-60"
+                        >
+                          {statusSavingId === listing.id ? "Saving..." : "Unrented"}
+                        </button>
+                      )}
                       <button
                         onClick={() => startEdit(listing)}
                         className="px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-700 text-xs font-semibold rounded-lg border border-teal-100"
@@ -228,12 +284,6 @@ export default function MyListingsDynamic() {
               <div><p className="text-slate-400 text-xs">Amenities</p><p className="font-semibold text-slate-800">{viewListing.amenities?.length ?? 0}</p></div>
               <div><p className="text-slate-400 text-xs">Status</p><p className="font-semibold text-slate-800 capitalize">{viewListing.status}</p></div>
             </div>
-            {viewListing.tour_360_url && (
-              <div className="space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">360 Room Tour</p>
-                <Viewer360 src={viewListing.tour_360_url} className="border-slate-100" />
-              </div>
-            )}
           </div>
         </div>
       )}

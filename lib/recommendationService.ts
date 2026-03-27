@@ -40,8 +40,40 @@ function normalizeText(value: string | null | undefined): string {
   return (value ?? "").trim().toLowerCase();
 }
 
+function getCityToken(value: string | null | undefined): string {
+  return normalizeText(value).split(",")[0]?.trim() ?? "";
+}
+
 function isSameCity(a: string | null | undefined, b: string | null | undefined): boolean {
-  return normalizeText(a) !== "" && normalizeText(a) === normalizeText(b);
+  const normalizedA = normalizeText(a);
+  const normalizedB = normalizeText(b);
+
+  if (!normalizedA || !normalizedB) {
+    return false;
+  }
+
+  if (normalizedA === normalizedB) {
+    return true;
+  }
+
+  const cityTokenA = getCityToken(a);
+  const cityTokenB = getCityToken(b);
+  return cityTokenA !== "" && cityTokenA === cityTokenB;
+}
+
+function getPreferredListingCity(renter: RenterProfileRecord): string | null {
+  const city = normalizeText(renter.move_to_city);
+  if (!city) {
+    return renter.city;
+  }
+
+  const province = (renter.move_to_province ?? "").trim();
+  if (!province) {
+    return renter.move_to_city;
+  }
+
+  const formattedProvince = province.length <= 3 ? province.toUpperCase() : province;
+  return `${renter.move_to_city}, ${formattedProvince}`;
 }
 
 function getBudgetScore(renter: RenterProfileRecord, listing: RecommendationCandidate): number {
@@ -158,7 +190,8 @@ function buildExplanation(parts: string[]): string {
 }
 
 function shouldPassHardFilters(renter: RenterProfileRecord, listing: RecommendationCandidate): boolean {
-  if (renter.city && !isSameCity(renter.city, listing.city)) {
+  const preferredCity = getPreferredListingCity(renter);
+  if (preferredCity && !isSameCity(preferredCity, listing.city)) {
     return false;
   }
 
@@ -186,7 +219,8 @@ function scoreListing(renter: RenterProfileRecord, listing: RecommendationCandid
     return null;
   }
 
-  const cityScore = isSameCity(renter.city, listing.city) ? 30 : 0;
+  const preferredCity = getPreferredListingCity(renter);
+  const cityScore = isSameCity(preferredCity, listing.city) ? 30 : 0;
   const budgetScore = getBudgetScore(renter, listing);
   const moveInScore = getMoveInScore(renter.move_in_date, listing.availableFrom);
   const roomTypeScore = getRoomTypeScore(renter.room_preference, listing.type);
@@ -198,7 +232,7 @@ function scoreListing(renter: RenterProfileRecord, listing: RecommendationCandid
   }
 
   const explanationParts: string[] = [];
-  if (cityScore > 0) explanationParts.push("Matches your preferred city");
+  if (cityScore > 0) explanationParts.push("Matches your move-to city");
   if (budgetScore >= 25) explanationParts.push("Fits your budget");
   else if (budgetScore > 0) explanationParts.push("Close to your budget");
   if (moveInScore >= 15) explanationParts.push("Available near your move-in date");
@@ -213,6 +247,36 @@ function scoreListing(renter: RenterProfileRecord, listing: RecommendationCandid
   };
 }
 
+function buildFallbackRecommendation(
+  renter: RenterProfileRecord,
+  listing: RecommendationCandidate,
+): RecommendedListingMatch | null {
+  const preferredCity = getPreferredListingCity(renter);
+  const cityScore = isSameCity(preferredCity, listing.city) ? 30 : 0;
+  const budgetScore = getBudgetScore(renter, listing);
+  const moveInScore = getMoveInScore(renter.move_in_date, listing.availableFrom);
+  const roomTypeScore = getRoomTypeScore(renter.room_preference, listing.type);
+  const optionalFeaturesScore = getOptionalFeaturesScore(listing);
+
+  const total = cityScore + Math.min(budgetScore, 15) + Math.min(moveInScore, 10) + roomTypeScore + optionalFeaturesScore;
+  if (total < 30) {
+    return null;
+  }
+
+  const explanationParts: string[] = [];
+  if (cityScore > 0) explanationParts.push("Good fit for your target city");
+  if (budgetScore > 0) explanationParts.push(budgetScore >= 25 ? "Fits your budget" : "Close to your budget");
+  if (roomTypeScore > 0) explanationParts.push(roomTypeScore >= 15 ? "Matches your preferred room type" : "Close to your room preference");
+  if (moveInScore > 0) explanationParts.push("Available near your move-in date");
+  if (optionalFeaturesScore > 0) explanationParts.push("Includes useful extras");
+
+  return {
+    ...listing,
+    matchPercentage: Math.min(Math.max(total, 35), 100),
+    explanation: buildExplanation(explanationParts),
+  };
+}
+
 export async function fetchRecommendedListings(renter: RenterProfileRecord, limit = 5): Promise<RecommendedListingMatch[]> {
   const response = await fetch("/api/verification/notify-upload?purpose=listings");
   const payload = (await response.json()) as ListingsPayload;
@@ -223,8 +287,27 @@ export async function fetchRecommendedListings(renter: RenterProfileRecord, limi
 
   const candidates = payload.listings ?? [];
 
-  return candidates
+  const strictMatches = candidates
     .map((listing) => scoreListing(renter, listing))
+    .filter((listing): listing is RecommendedListingMatch => Boolean(listing))
+    .sort((a, b) => {
+      if (b.matchPercentage !== a.matchPercentage) {
+        return b.matchPercentage - a.matchPercentage;
+      }
+      return a.price - b.price;
+    });
+
+  if (strictMatches.length > 0) {
+    return strictMatches.slice(0, limit);
+  }
+
+  const preferredCity = getPreferredListingCity(renter);
+  const cityScopedCandidates = preferredCity
+    ? candidates.filter((listing) => isSameCity(preferredCity, listing.city))
+    : candidates;
+
+  return cityScopedCandidates
+    .map((listing) => buildFallbackRecommendation(renter, listing))
     .filter((listing): listing is RecommendedListingMatch => Boolean(listing))
     .sort((a, b) => {
       if (b.matchPercentage !== a.matchPercentage) {
