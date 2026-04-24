@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import RenterSidebar, { Tab } from "@/components/renter/RenterSidebar";
 import DashboardOverview from "@/components/renter/DashboardOverview";
 import RenterProfile from "@/components/renter/RenterProfile";
@@ -39,7 +39,7 @@ const tabTitles: Record<Tab, string> = {
 
 const allowedWhenUnverified: Tab[] = ["profile", "settings", "verification"];
 
-export default function RenterDashboardPage() {
+function RenterDashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const listingId = searchParams.get("listingId");
@@ -416,5 +416,13 @@ export default function RenterDashboardPage() {
         </main>
       </div>
     </div>
+  );
+}
+
+export default function RenterDashboardPage() {
+  return (
+    <Suspense fallback={<main className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-600">Loading renter dashboard...</main>}>
+      <RenterDashboardContent />
+    </Suspense>
   );
 }

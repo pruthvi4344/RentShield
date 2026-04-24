@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { type EmailOtpType } from "@supabase/supabase-js";
 import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
 import { resolvePostLoginRoute } from "@/lib/profileService";
 
-export default function AuthCallbackPage() {
+function AuthCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [error, setError] = useState("");
@@ -104,5 +104,22 @@ export default function AuthCallbackPage() {
         )}
       </div>
     </main>
+  );
+}
+
+export default function AuthCallbackPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-8 border border-slate-100 shadow-xl shadow-slate-200/70">
+            <h1 className="text-xl font-bold text-slate-900">Verifying your account...</h1>
+            <p className="mt-2 text-sm text-slate-600">Please wait while we finish sign-in.</p>
+          </div>
+        </main>
+      }
+    >
+      <AuthCallbackContent />
+    </Suspense>
   );
 }
